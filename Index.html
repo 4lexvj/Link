@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Immo-Alex - Drumettaz-Clarafond</title>
+    <title>Immo-Alex - Rapport de Chantier</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -15,6 +15,7 @@
             -webkit-tap-highlight-color: transparent; 
             touch-action: manipulation; 
             overscroll-behavior: none;
+            background-color: #f8fafc;
         }
         canvas { touch-action: none; background: white; }
 
@@ -41,11 +42,11 @@
         .print-only { display: none; }
     </style>
 </head>
-<body class="bg-slate-50 font-sans text-slate-900">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
         
         const Icon = ({ name, size = 20, className = "" }) => {
             const iconRef = useRef(null);
@@ -59,6 +60,43 @@
                 }
             }, [name, size, className]);
             return <i data-lucide={name} ref={iconRef} className="inline-block"></i>;
+        };
+
+        // Utilitaire pour compresser l'image et éviter l'écran blanc
+        const resizeImage = (file) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 800;
+                        const MAX_HEIGHT = 800;
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > height) {
+                            if (width > MAX_WIDTH) {
+                                height *= MAX_WIDTH / width;
+                                width = MAX_WIDTH;
+                            }
+                        } else {
+                            if (height > MAX_HEIGHT) {
+                                width *= MAX_HEIGHT / height;
+                                height = MAX_HEIGHT;
+                            }
+                        }
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        // Qualité JPEG à 0.7 pour réduire considérablement le poids
+                        resolve(canvas.toDataURL('image/jpeg', 0.7));
+                    };
+                };
+            });
         };
 
         const SignaturePad = ({ label, onSave, savedImage }) => {
@@ -132,49 +170,60 @@
             const [step, setStep] = useState(1);
             const fileInputRef = useRef(null);
             const [activeTarget, setActiveTarget] = useState(null);
+            const [isProcessing, setIsProcessing] = useState(false);
             const [shareStatus, setShareStatus] = useState(null);
             
             const [formData, setFormData] = useState(() => {
-                const saved = localStorage.getItem('immo_alex_drumettaz_v3');
+                const saved = localStorage.getItem('immo_alex_drumettaz_v4');
                 return saved ? JSON.parse(saved) : {
                     property: { address: 'Drumettaz-Clarafond', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
-                    rooms: [{ id: 1, name: 'Séjour', elements: [{ id: 101, label: 'Murs et Plafonds', status: 'Bon', photos: [], comment: '' }] }],
+                    rooms: [{ id: 1, name: 'Pièce Principale', elements: [{ id: 101, label: 'Murs et Plafonds', status: 'Bon', photos: [], comment: '' }] }],
                     signatures: { owner: null, tenant: null }
                 };
             });
 
             useEffect(() => {
-                localStorage.setItem('immo_alex_drumettaz_v3', JSON.stringify(formData));
+                // On essaie de sauvegarder, mais si c'est trop gros pour localStorage, on ne bloque pas l'appli
+                try {
+                    localStorage.setItem('immo_alex_drumettaz_v4', JSON.stringify(formData));
+                } catch (e) {
+                    console.warn("Stockage local saturé.");
+                }
                 if (window.lucide) window.lucide.createIcons();
             }, [formData, step]);
 
-            const handlePhoto = (e) => {
+            const handlePhoto = async (e) => {
                 const file = e.target.files[0];
                 if (!file || !activeTarget) return;
-                const reader = new FileReader();
-                reader.onloadend = () => {
+                
+                setIsProcessing(true);
+                try {
+                    const compressedImage = await resizeImage(file);
                     const newRooms = formData.rooms.map(r => r.id === activeTarget.roomId ? {
                         ...r, elements: r.elements.map(el => el.id === activeTarget.elementId ? {
-                            ...el, photos: [...el.photos, reader.result]
+                            ...el, photos: [...el.photos, compressedImage]
                         } : el)
                     } : r);
                     setFormData({...formData, rooms: newRooms});
-                };
-                reader.readAsDataURL(file);
+                } catch (err) {
+                    console.error("Erreur compression:", err);
+                } finally {
+                    setIsProcessing(false);
+                }
             };
 
             const handleShare = async () => {
                 const text = `État des lieux Immo-Alex's\n` +
                              `Adresse : ${formData.property.address}\n` +
-                             `Bailleur : ${formData.property.owner}\n` +
+                             `Propriétaire : ${formData.property.owner}\n` +
                              `Locataire : ${formData.property.tenant}\n` +
                              `Date : ${formData.property.date}\n` +
-                             `Statut : Signé par les deux parties.`;
+                             `Document finalisé et signé.`;
 
                 if (navigator.share) {
                     try {
                         await navigator.share({
-                            title: 'État des Lieux - Drumettaz',
+                            title: 'État des Lieux',
                             text: text,
                             url: window.location.href
                         });
@@ -183,19 +232,14 @@
                         setShareStatus('error');
                     }
                 } else {
-                    // Fallback clipboard
-                    try {
-                        const dummy = document.createElement("textarea");
-                        document.body.appendChild(dummy);
-                        dummy.value = text;
-                        dummy.select();
-                        document.execCommand("copy");
-                        document.body.removeChild(dummy);
-                        setShareStatus('copied');
-                        setTimeout(() => setShareStatus(null), 2000);
-                    } catch (err) {
-                        setShareStatus('error');
-                    }
+                    const dummy = document.createElement("textarea");
+                    document.body.appendChild(dummy);
+                    dummy.value = text;
+                    dummy.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(dummy);
+                    setShareStatus('copied');
+                    setTimeout(() => setShareStatus(null), 2000);
                 }
             };
 
@@ -203,15 +247,24 @@
                 <div className="min-h-screen flex flex-col items-center pb-32">
                     <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhoto} className="hidden" />
                     
+                    {/* Loading Overlay */}
+                    {isProcessing && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center">
+                            <div className="bg-white p-6 rounded-3xl shadow-2xl text-center space-y-4">
+                                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                                <p className="text-xs font-bold uppercase tracking-widest text-slate-600">Compression de la photo...</p>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="w-full max-w-lg bg-white min-h-screen flex flex-col shadow-2xl relative main-container overflow-hidden">
                         
-                        {/* Header UI */}
                         <header className="bg-slate-900 p-6 text-white sticky top-0 z-20 flex justify-between items-center shadow-xl no-print">
                             <div className="flex items-center gap-3">
                                 <div className="bg-blue-600 p-2 rounded-lg"><Icon name="home" size={20} /></div>
                                 <div>
                                     <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Immo-Alex's</h1>
-                                    <span className="text-[9px] text-blue-400 font-bold uppercase tracking-[0.1em]">Appartement Drumettaz-Clarafond</span>
+                                    <span className="text-[9px] text-blue-400 font-bold uppercase tracking-[0.1em]">Rapport Drumettaz-Clarafond</span>
                                 </div>
                             </div>
                             <div className="bg-slate-800 px-3 py-1 rounded-full text-[10px] font-bold text-slate-400">
@@ -219,43 +272,41 @@
                             </div>
                         </header>
 
-                        {/* PDF Content (Visible only on print) */}
+                        {/* PDF (uniquement impression) */}
                         <div className="print-only p-8">
                             <div className="pdf-header flex justify-between items-start">
                                 <div>
-                                    <h1 className="text-2xl font-black uppercase text-slate-900">Constat d'État des Lieux</h1>
-                                    <p className="text-blue-600 font-bold uppercase text-[10px] tracking-widest mt-1">Immo-Alex's Immobilier</p>
+                                    <h1 className="text-2xl font-black uppercase text-slate-900">État des Lieux</h1>
+                                    <p className="text-blue-600 font-bold uppercase text-[10px] mt-1 tracking-widest">Immo-Alex's Immobilier</p>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Document généré le</p>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Émis le</p>
                                     <p className="font-bold">{formData.property.date}</p>
                                 </div>
                             </div>
-
                             <div className="grid grid-cols-3 gap-4 mb-8">
-                                <div className="col-span-1">
+                                <div>
                                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Localisation</p>
                                     <p className="text-xs font-bold leading-tight">{formData.property.address}</p>
                                 </div>
-                                <div className="col-span-1">
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Bailleur</p>
+                                <div>
+                                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Propriétaire</p>
                                     <p className="text-xs font-bold leading-tight">{formData.property.owner || '—'}</p>
                                 </div>
-                                <div className="col-span-1">
+                                <div>
                                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Locataire</p>
                                     <p className="text-xs font-bold leading-tight">{formData.property.tenant || '—'}</p>
                                 </div>
                             </div>
-
                             {formData.rooms.map((room, rIdx) => (
                                 <div key={room.id} className={`${rIdx > 0 ? 'page-break' : ''}`}>
                                     <div className="pdf-section-title">{room.name}</div>
                                     <table className="pdf-table">
                                         <thead>
                                             <tr>
-                                                <th style={{width: '40%'}}>Élément / Équipement</th>
-                                                <th style={{width: '20%'}}>État</th>
-                                                <th style={{width: '40%'}}>Observations</th>
+                                                <th style={{width: '35%'}}>Élément</th>
+                                                <th style={{width: '15%'}}>État</th>
+                                                <th style={{width: '50%'}}>Observations</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -264,7 +315,7 @@
                                                     <tr>
                                                         <td className="font-bold text-xs uppercase">{el.label}</td>
                                                         <td className="text-xs font-bold">{el.status.toUpperCase()}</td>
-                                                        <td className="text-[10px] text-slate-500 italic">{el.comment || 'Aucune observation particulière.'}</td>
+                                                        <td className="text-[10px] text-slate-500">{el.comment || 'N/A'}</td>
                                                     </tr>
                                                     {el.photos.length > 0 && (
                                                         <tr>
@@ -281,42 +332,24 @@
                                     </table>
                                 </div>
                             ))}
-
-                            <div className="signature-container">
-                                <div className="signature-box">
-                                    <span className="text-[9px] font-black text-slate-400 uppercase border-b pb-1">Signature du Bailleur</span>
-                                    <div className="flex-1 flex items-center justify-center">
-                                        {formData.signatures.owner && <img src={formData.signatures.owner} className="max-h-24 object-contain" />}
-                                    </div>
-                                    <p className="text-[9px] font-bold text-center uppercase text-slate-900 mt-2">{formData.property.owner}</p>
-                                </div>
-                                <div className="signature-box">
-                                    <span className="text-[9px] font-black text-slate-400 uppercase border-b pb-1">Signature du Locataire</span>
-                                    <div className="flex-1 flex items-center justify-center">
-                                        {formData.signatures.tenant && <img src={formData.signatures.tenant} className="max-h-24 object-contain" />}
-                                    </div>
-                                    <p className="text-[9px] font-bold text-center uppercase text-slate-900 mt-2">{formData.property.tenant}</p>
-                                </div>
-                            </div>
                         </div>
 
-                        {/* UI Sections */}
                         <main className="flex-1 p-6 no-print">
                             {step === 1 && (
                                 <div className="space-y-6">
-                                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">1. Coordonnées</h2>
+                                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter italic">1. Informations</h2>
                                     <div className="space-y-4">
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Propriétaire / Bailleur</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom complet" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Adresse du bien</label>
+                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none font-bold" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} />
                                         </div>
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Locataire</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom complet" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Bailleur</label>
+                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom du propriétaire" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
                                         </div>
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Date du constat</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" type="text" value={formData.property.date} onChange={e => setFormData({...formData, property: {...formData.property, date: e.target.value}})} />
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Locataire</label>
+                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom du locataire" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
                                         </div>
                                     </div>
                                 </div>
@@ -329,28 +362,23 @@
                                         <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3 rounded-2xl shadow-lg"><Icon name="plus" size={20} /></button>
                                     </div>
                                     {formData.rooms.map(room => (
-                                        <div key={room.id} className="bg-slate-50 p-5 rounded-[2.5rem] border border-slate-200 mb-6">
+                                        <div key={room.id} className="bg-slate-100 p-5 rounded-[2.5rem] mb-6">
                                             <input className="font-black text-slate-900 bg-transparent outline-none w-full text-lg uppercase mb-4" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
                                             <div className="space-y-4">
                                                 {room.elements.map(el => (
-                                                    <div key={el.id} className="bg-white p-4 rounded-3xl shadow-sm">
-                                                        <input className="w-full font-bold text-slate-700 outline-none mb-2" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                                                        <div className="flex gap-2 mb-3">
+                                                    <div key={el.id} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100">
+                                                        <input className="w-full font-bold text-slate-700 outline-none mb-3" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                        <div className="flex gap-1 mb-3">
                                                             {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
-                                                                <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border-2 transition-all ${el.status === s ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-300 border-slate-50'}`}>{s.toUpperCase()}</button>
+                                                                <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border-2 transition-all ${el.status === s ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-300 border-slate-50'}`}>{s.toUpperCase()}</button>
                                                             ))}
                                                         </div>
-                                                        <textarea 
-                                                            className="w-full p-3 rounded-xl bg-slate-50 text-[10px] mb-3 outline-none border border-transparent focus:border-slate-200" 
-                                                            placeholder="Ajouter une observation..."
-                                                            value={el.comment}
-                                                            onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})}
-                                                        />
-                                                        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                                                        <textarea className="w-full p-3 rounded-xl bg-slate-50 text-[10px] mb-3 outline-none" placeholder="Observation..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+                                                        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
                                                             <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-14 h-14 shrink-0 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400"><Icon name="camera" size={24} /></button>
                                                             {el.photos.map((p, i) => (
                                                                 <div key={i} className="relative shrink-0">
-                                                                    <img src={p} className="w-14 h-14 object-cover rounded-xl border-2 border-white" />
+                                                                    <img src={p} className="w-14 h-14 object-cover rounded-xl border-2 border-white shadow-sm" />
                                                                     <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, idx) => idx !== i)} : e2)} : r)})} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><Icon name="x" size={8} /></button>
                                                                 </div>
                                                             ))}
@@ -368,48 +396,30 @@
                                 <div className="space-y-8 pb-10">
                                     <h2 className="text-xl font-black text-center uppercase tracking-tighter">3. Signatures</h2>
                                     <div className="space-y-10">
-                                        <SignaturePad 
-                                            label="Signature du Bailleur" 
-                                            onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})}
-                                            savedImage={formData.signatures.owner}
-                                        />
-                                        <SignaturePad 
-                                            label="Signature du Locataire" 
-                                            onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})}
-                                            savedImage={formData.signatures.tenant}
-                                        />
+                                        <SignaturePad label="Signature du Bailleur" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
+                                        <SignaturePad label="Signature du Locataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} savedImage={formData.signatures.tenant} />
                                     </div>
                                 </div>
                             )}
 
                             {step === 4 && (
                                 <div className="space-y-6 text-center py-10">
-                                    <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-white mx-auto shadow-2xl mb-4"><Icon name="check" size={40} /></div>
-                                    <div className="space-y-2">
-                                        <h2 className="text-2xl font-black uppercase tracking-tighter">Prêt pour envoi</h2>
-                                        <p className="text-sm text-slate-400 px-10">Le constat est signé et prêt à être partagé.</p>
-                                    </div>
-                                    
+                                    <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-white mx-auto shadow-2xl mb-4 animate-bounce"><Icon name="check" size={40} /></div>
+                                    <h2 className="text-2xl font-black uppercase tracking-tighter">Rapport Finalisé</h2>
                                     <div className="space-y-3 pt-6">
                                         <button onClick={() => window.print()} className="w-full py-6 bg-slate-900 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
                                             <Icon name="file-text" size={24} /> GÉNÉRER LE PDF
                                         </button>
-                                        
                                         <button onClick={handleShare} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
                                             <Icon name="share-2" size={20} /> 
                                             {shareStatus === 'copied' ? 'TEXTE COPIÉ !' : 'PARTAGER LE RAPPORT'}
                                         </button>
-
-                                        {shareStatus === 'error' && (
-                                            <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest mt-2">Erreur lors du partage</p>
-                                        )}
                                     </div>
                                 </div>
                             )}
                         </main>
 
-                        {/* Footer Nav */}
-                        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-30 max-w-lg mx-auto rounded-t-[2.5rem] no-print">
+                        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-30 max-w-lg mx-auto rounded-t-[2.5rem] no-print">
                             {step > 1 && (
                                 <button onClick={() => setStep(s => s - 1)} className="p-6 rounded-3xl bg-slate-50 text-slate-400 active:bg-slate-100 transition-all"><Icon name="arrow-left" size={24} /></button>
                             )}
