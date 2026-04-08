@@ -19,10 +19,13 @@ import {
   WifiOff
 } from 'lucide-react';
 
-// --- CONFIGURATION FIREBASE ---
-// Note: Si la clé API est invalide dans cet environnement, l'app passera en mode "Local"
+/**
+ * CONFIGURATION FIREBASE
+ * Note: L'apiKey est nécessaire pour Firebase. Si elle est invalide, 
+ * l'application passera en mode "Stockage Local" automatiquement.
+ */
 const firebaseConfig = {
-  apiKey: "AIzaSyDFm8IK-WL0T4U5n8SNKxS6aE6ePU807_c",
+  apiKey: "", // La clé sera injectée par l'environnement ou restera vide pour le mode local
   authDomain: "link-immo-drumet.firebaseapp.com",
   projectId: "link-immo-drumet",
   storageBucket: "link-immo-drumet.firebasestorage.app",
@@ -32,7 +35,7 @@ const firebaseConfig = {
 
 const appId = 'link-immo-drumet-app';
 
-// --- UTILITAIRES ---
+// --- UTILITAIRES DE COMPRESSION ---
 const resizeImage = (file) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -125,14 +128,14 @@ const SignaturePad = ({ label, onSave, savedImage }) => {
         }} className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase">Effacer</button>
         <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} 
                 className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all ${hasContent ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
-          Valider
+          Valider la signature
         </button>
       </div>
     </div>
   );
 };
 
-// --- COMPOSANT PRINCIPAL ---
+// --- APPLICATION PRINCIPALE ---
 export default function App() {
   const [user, setUser] = useState(null);
   const [step, setStep] = useState(1);
@@ -141,67 +144,56 @@ export default function App() {
   const [activeTarget, setActiveTarget] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Services Firebase (initialisés dynamiquement pour éviter le crash)
+  // Initialisation des services
   const [services, setServices] = useState({ auth: null, db: null, available: false });
 
-  const [formData, setFormData] = useState({
-    property: { address: 'Drumettaz-Clarafond', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
-    rooms: [{ id: 1, name: 'Pièce Principale', elements: [{ id: 101, label: 'Murs et Plafonds', status: 'Bon', photos: [], comment: '' }] }],
-    signatures: { owner: null, tenant: null }
+  const [formData, setFormData] = useState(() => {
+    // Tentative de récupération locale au démarrage pour Netlify (persistance)
+    const saved = localStorage.getItem('immo_alex_draft');
+    return saved ? JSON.parse(saved) : {
+      property: { address: 'Drumettaz-Clarafond', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
+      rooms: [{ id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte et Serrure', status: 'Bon', photos: [], comment: '' }] }],
+      signatures: { owner: null, tenant: null }
+    };
   });
 
-  // (1) Initialisation sécurisée
+  // Sauvegarde locale systématique (Sécurité Netlify/Mobile)
+  useEffect(() => {
+    localStorage.setItem('immo_alex_draft', JSON.stringify(formData));
+  }, [formData]);
+
+  // Initialisation Firebase
   useEffect(() => {
     try {
+      if (!firebaseConfig.apiKey) throw new Error("No API Key");
       const fbApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
       const fbAuth = getAuth(fbApp);
       const fbDb = getFirestore(fbApp);
       setServices({ auth: fbAuth, db: fbDb, available: true });
     } catch (err) {
-      console.error("Firebase init bypass:", err);
+      console.warn("Mode local activé (Firebase indisponible)");
       setSyncStatus('error');
     }
   }, []);
 
-  // (2) Authentification avec gestion d'erreur clé API
+  // Authentification anonyme
   useEffect(() => {
     if (!services.available || !services.auth) return;
-
-    let isMounted = true;
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(services.auth);
-      } catch (err) {
-        if (isMounted) {
-          console.warn("Auth Bypass (Mode Local activé)");
-          setSyncStatus('error'); // Signale le mode local
-        }
-      }
-    };
-
-    initAuth();
+    
+    signInAnonymously(services.auth).catch(() => setSyncStatus('error'));
     const unsubscribe = onAuthStateChanged(services.auth, (u) => {
-      if (isMounted && u) setUser(u);
+      if (u) setUser(u);
     });
     
-    return () => {
-      isMounted = false;
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [services]);
 
-  // (3) Cloud Sync - Uniquement si auth ok
+  // Synchronisation Cloud
   useEffect(() => {
     if (!user || !services.db || syncStatus === 'error') return;
     
     const docRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'settings', 'current_report');
     
-    // Premier chargement
-    getDoc(docRef).then(snap => {
-      if (snap.exists()) setFormData(snap.data());
-    }).catch(e => console.log("Local mode only"));
-
-    // Auto-save
     const timer = setTimeout(async () => {
       setSyncStatus('syncing');
       try {
@@ -211,7 +203,7 @@ export default function App() {
       } catch (err) {
         setSyncStatus('error');
       }
-    }, 3000);
+    }, 5000);
 
     return () => clearTimeout(timer);
   }, [formData, user, services, syncStatus]);
@@ -229,112 +221,114 @@ export default function App() {
       } : r);
       setFormData({...formData, rooms: newRooms});
     } catch (err) {
-      console.error(err);
+      console.error("Erreur photo:", err);
     } finally {
       setIsProcessing(false);
+      e.target.value = null; // Reset input
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center font-sans">
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center font-sans antialiased">
       <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhoto} className="hidden" />
       
       {isProcessing && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl space-y-4 text-center">
-            <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mx-auto" />
-            <p className="text-xs font-black uppercase tracking-widest text-slate-600">Traitement...</p>
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-6 text-white">
+          <div className="text-center space-y-4">
+            <RefreshCw className="w-12 h-12 animate-spin mx-auto text-blue-400" />
+            <p className="text-xs font-black uppercase tracking-[0.3em]">Traitement de l'image...</p>
           </div>
         </div>
       )}
 
-      <div className="w-full max-w-lg bg-white min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
+      <div className="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative overflow-x-hidden">
         
-        <header className="bg-slate-900 p-6 text-white sticky top-0 z-20 flex justify-between items-center shadow-xl">
+        <header className="bg-slate-900 p-6 text-white sticky top-0 z-30 flex justify-between items-center border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-xl shadow-lg shadow-blue-900/20"><Home size={20} /></div>
+            <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-2.5 rounded-2xl shadow-lg shadow-blue-500/20">
+              <Home size={20} />
+            </div>
             <div>
               <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Immo-Alex</h1>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-[9px] text-blue-400 font-bold uppercase tracking-widest">Drumettaz</span>
-                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-800 rounded-full">
-                  {syncStatus === 'syncing' && <RefreshCw size={10} className="animate-spin text-blue-400" />}
-                  {syncStatus === 'saved' && <Cloud size={10} className="text-emerald-400" />}
-                  {syncStatus === 'error' && <WifiOff size={10} className="text-amber-400" />}
-                  {syncStatus === 'idle' && <Cloud size={10} className="text-slate-600" />}
-                  <span className="text-[8px] font-bold uppercase text-slate-400">
-                    {syncStatus === 'error' ? 'HORS-LIGNE' : syncStatus === 'syncing' ? 'Synchro...' : 'Cloud'}
+                <span className="text-[9px] text-blue-400 font-bold uppercase tracking-widest">Expertise</span>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-800/50 rounded-full border border-slate-700">
+                  {syncStatus === 'syncing' ? <RefreshCw size={8} className="animate-spin text-blue-400" /> : <Cloud size={8} className={syncStatus === 'error' ? 'text-amber-500' : 'text-emerald-400'} />}
+                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">
+                    {syncStatus === 'error' ? 'Local' : 'Synchronisé'}
                   </span>
                 </div>
               </div>
             </div>
           </div>
-          <div className="bg-slate-800 px-3 py-1 rounded-full text-[10px] font-black text-slate-400 uppercase">
-            Étape {step}/4
+          <div className="text-[10px] font-black bg-slate-800 px-3 py-1.5 rounded-xl text-slate-300">
+            {step}/4
           </div>
         </header>
 
-        <main className="flex-1 p-6 pb-32">
-          {syncStatus === 'error' && (
-            <div className="mb-6 p-4 bg-amber-50 border-2 border-amber-100 rounded-2xl flex items-center gap-3">
-              <AlertCircle className="text-amber-500 shrink-0" size={20} />
-              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-tight leading-tight">
-                Mode Local Activé : Cloud indisponible (Clé API). Vos données restent dans le navigateur.
-              </p>
-            </div>
-          )}
-
+        <main className="flex-1 p-6 pb-40">
           {step === 1 && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter border-l-4 border-blue-600 pl-3 italic">1. Informations</h2>
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Adresse</label>
-                  <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none font-bold" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} />
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter italic border-l-4 border-blue-600 pl-4">Propriété</h2>
+              <div className="space-y-5">
+                <div className="group">
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest mb-1 block">Adresse du bien</label>
+                  <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:border-blue-500 focus:bg-white transition-all outline-none font-bold text-slate-700" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm" placeholder="Bailleur" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
-                  <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm" placeholder="Locataire" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest mb-1 block">Bailleur</label>
+                    <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-slate-100 text-sm font-bold" placeholder="Nom..." value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest mb-1 block">Locataire</label>
+                    <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-slate-100 text-sm font-bold" placeholder="Nom..." value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {step === 2 && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter border-l-4 border-blue-600 pl-3">2. Inventaire</h2>
-                <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3 rounded-2xl shadow-lg active:scale-90 transition-transform"><Plus size={20} /></button>
+            <div className="space-y-6 animate-in fade-in duration-500">
+              <div className="flex justify-between items-center sticky top-24 bg-white/90 backdrop-blur-md py-2 z-20">
+                <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter border-l-4 border-blue-600 pl-4">Inventaire</h2>
+                <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-xl active:scale-90 transition-all"><Plus size={20} /></button>
               </div>
               
               {formData.rooms.map(room => (
-                <div key={room.id} className="bg-slate-100 p-5 rounded-[2.5rem] mb-8 border border-slate-200">
-                  <input className="font-black text-slate-900 bg-transparent outline-none w-full text-lg uppercase mb-4" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
-                  <div className="space-y-4">
+                <div key={room.id} className="bg-slate-50 p-5 rounded-[2.5rem] mb-10 border border-slate-200/60 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <input className="font-black text-slate-900 bg-transparent outline-none w-full text-xl uppercase italic tracking-tighter" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                  </div>
+                  <div className="space-y-5">
                     {room.elements.map(el => (
-                      <div key={el.id} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200/50">
-                        <div className="flex justify-between items-center mb-3">
-                          <input className="font-bold text-slate-700 outline-none flex-1" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                          <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.filter(e2 => e2.id !== el.id)} : r)})} className="text-slate-300"><X size={14}/></button>
+                      <div key={el.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+                        <div className="flex justify-between items-center mb-4">
+                          <input className="font-bold text-slate-800 outline-none flex-1 uppercase text-xs tracking-wider" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                          <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.filter(e2 => e2.id !== el.id)} : r)})} className="text-slate-300 p-1"><X size={16}/></button>
                         </div>
-                        <div className="flex gap-1 mb-3">
+                        <div className="flex gap-1.5 mb-4">
                           {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
-                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border-2 ${el.status === s ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-300 border-slate-100'}`}>{s.toUpperCase()}</button>
+                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2.5 rounded-xl text-[9px] font-black border-2 transition-all ${el.status === s ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-300 border-slate-50'}`}>{s.toUpperCase()}</button>
                           ))}
                         </div>
-                        <textarea className="w-full p-3 rounded-xl bg-slate-50 text-[10px] mb-3 outline-none" placeholder="Observation..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
-                        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                          <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-16 h-16 shrink-0 bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl flex items-center justify-center text-blue-400"><Camera size={24} /></button>
+                        <textarea className="w-full p-4 rounded-2xl bg-slate-50 text-[11px] mb-4 outline-none border-2 border-transparent focus:border-slate-100 font-medium" placeholder="Observations détaillées..." rows="2" value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+                        <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                          <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-20 h-20 shrink-0 bg-blue-50 border-2 border-dashed border-blue-200 rounded-[1.5rem] flex flex-col items-center justify-center text-blue-500 gap-1 active:bg-blue-100 transition-colors">
+                            <Camera size={24} />
+                            <span className="text-[8px] font-black uppercase tracking-tighter">Photo</span>
+                          </button>
                           {el.photos.map((p, i) => (
                             <div key={i} className="relative shrink-0">
-                              <img src={p} className="w-16 h-16 object-cover rounded-2xl border-2 border-white shadow-md" alt="Aperçu" />
-                              <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, idx) => idx !== i)} : e2)} : r)})} className="absolute -top-2 -right-2 bg-slate-900 text-white rounded-full p-1"><X size={10} /></button>
+                              <img src={p} className="w-20 h-20 object-cover rounded-[1.5rem] border-2 border-white shadow-md" alt="Preuve" />
+                              <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, idx) => idx !== i)} : e2)} : r)})} className="absolute -top-2 -right-2 bg-slate-900 text-white rounded-full p-1.5 shadow-lg border border-white/20"><X size={10} /></button>
                             </div>
                           ))}
                         </div>
                       </div>
                     ))}
-                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-3 text-[10px] font-black text-blue-600 bg-blue-50 border-2 border-dashed border-blue-100 rounded-2xl uppercase">+ Ajouter</button>
+                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Élément', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-4 text-[10px] font-black text-blue-600 bg-white border-2 border-dashed border-blue-100 rounded-3xl uppercase tracking-widest hover:bg-blue-50 transition-colors">+ Ajouter un élément</button>
                   </div>
                 </div>
               ))}
@@ -342,44 +336,54 @@ export default function App() {
           )}
 
           {step === 3 && (
-            <div className="space-y-8 animate-in slide-in-from-right duration-300">
-              <h2 className="text-xl font-black text-center uppercase tracking-tighter border-b-2 border-slate-100 pb-4 italic">3. Signatures</h2>
-              <div className="space-y-10">
-                <SignaturePad label="Le Bailleur" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
+            <div className="space-y-10 animate-in slide-in-from-right duration-500">
+              <h2 className="text-2xl font-black text-center uppercase tracking-tighter italic border-b-2 border-slate-100 pb-4">Signatures</h2>
+              <div className="space-y-12">
+                <SignaturePad label="Le Bailleur (Propriétaire)" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
                 <SignaturePad label="Le Locataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} savedImage={formData.signatures.tenant} />
               </div>
             </div>
           )}
 
           {step === 4 && (
-            <div className="space-y-8 text-center animate-in zoom-in duration-300 py-10">
-              <div className="relative mx-auto w-24 h-24">
-                  <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-20"></div>
-                  <div className="relative w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-2xl"><Check size={48} /></div>
+            <div className="space-y-10 text-center animate-in zoom-in duration-500 py-10">
+              <div className="relative mx-auto w-28 h-28">
+                  <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-10"></div>
+                  <div className="relative w-28 h-28 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center text-white shadow-2xl shadow-emerald-200"><Check size={56} /></div>
               </div>
-              <h2 className="text-2xl font-black uppercase tracking-tighter">Terminé</h2>
-              <div className="space-y-4 pt-6 px-4">
-                <button onClick={() => window.print()} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all">
-                  <FileText size={24} /> GÉNÉRER LE PDF
+              <div className="space-y-2">
+                <h2 className="text-3xl font-black uppercase tracking-tighter text-slate-900 italic">Rapport Prêt</h2>
+                <p className="text-xs font-bold text-slate-400 px-10">L'état des lieux a été enregistré avec succès et peut être généré.</p>
+              </div>
+              <div className="space-y-4 pt-10">
+                <button onClick={() => window.print()} className="w-full py-7 bg-slate-900 text-white rounded-[2.5rem] font-black flex items-center justify-center gap-4 shadow-2xl active:scale-95 transition-all uppercase tracking-widest text-xs">
+                  <FileText size={24} /> Télécharger PDF
                 </button>
                 <button onClick={() => {
-                    const text = `État des lieux : ${formData.property.address}`;
-                    if(navigator.share) navigator.share({ title: 'Rapport Immo-Alex', text });
-                }} className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
-                  <Share2 size={20} /> PARTAGER
+                    if(navigator.share) {
+                        navigator.share({ 
+                            title: 'État des lieux Immo-Alex', 
+                            text: `Rapport pour : ${formData.property.address}`,
+                            url: window.location.href
+                        });
+                    }
+                }} className="w-full py-6 bg-blue-600 text-white rounded-[2.5rem] font-black flex items-center justify-center gap-4 shadow-xl active:scale-95 transition-all uppercase tracking-widest text-xs">
+                  <Share2 size={20} /> Partager le lien
                 </button>
               </div>
             </div>
           )}
         </main>
 
-        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-40 max-w-lg mx-auto rounded-t-[3rem] no-print">
+        <footer className="fixed bottom-0 left-0 right-0 p-8 bg-white/90 backdrop-blur-2xl border-t border-slate-100 flex justify-between gap-4 z-40 max-w-md mx-auto rounded-t-[3.5rem] no-print shadow-[0_-20px_50px_-12px_rgba(0,0,0,0.05)]">
           {step > 1 && (
-            <button onClick={() => setStep(s => s - 1)} className="p-6 rounded-[2rem] bg-slate-100 text-slate-500 active:bg-slate-200 transition-all"><ArrowLeft size={24} /></button>
+            <button onClick={() => setStep(s => s - 1)} className="p-7 rounded-full bg-slate-100 text-slate-500 active:scale-90 transition-all border border-slate-200">
+              <ArrowLeft size={24} />
+            </button>
           )}
           {step < 4 && (
-            <button onClick={() => setStep(s => s + 1)} className="flex-1 py-6 rounded-[2rem] bg-slate-900 text-white font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all uppercase tracking-[0.2em] text-[10px]">
-              {step === 3 ? 'Finaliser' : 'Suivant'} <ChevronRight size={20} />
+            <button onClick={() => setStep(s => s + 1)} className="flex-1 py-6 rounded-full bg-slate-900 text-white font-black flex items-center justify-center gap-4 shadow-2xl shadow-slate-900/20 active:scale-95 transition-all uppercase tracking-[0.3em] text-[11px]">
+              {step === 3 ? 'Finaliser' : 'Continuer'} <ChevronRight size={18} />
             </button>
           )}
         </footer>
@@ -387,11 +391,14 @@ export default function App() {
       
       <style>{`
         @media print {
-            @page { size: A4; margin: 1.5cm; }
-            body { background: white !important; }
+            @page { size: A4; margin: 0; }
+            body { background: white !important; -webkit-print-color-adjust: exact; }
             .no-print { display: none !important; }
+            main { padding: 0 !important; }
+            header { background: #0f172a !important; color: white !important; }
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        * { -webkit-tap-highlight-color: transparent; }
       `}</style>
     </div>
   );
