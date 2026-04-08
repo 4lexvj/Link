@@ -1,441 +1,398 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Immo-Alex - Rapport de Chantier</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <style>
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        body { 
-            -webkit-tap-highlight-color: transparent; 
-            touch-action: manipulation; 
-            overscroll-behavior: none;
-            background-color: #f8fafc;
-        }
-        canvas { touch-action: none; background: white; }
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+import { 
+  Home, 
+  Plus, 
+  Camera, 
+  X, 
+  ArrowLeft, 
+  ChevronRight, 
+  Check, 
+  FileText, 
+  Share2, 
+  RotateCcw,
+  Cloud,
+  RefreshCw,
+  AlertCircle,
+  WifiOff
+} from 'lucide-react';
 
-        @media print {
-            @page { size: A4; margin: 1cm; }
-            body { background: white !important; -webkit-print-color-adjust: exact; font-size: 11pt; }
-            .no-print { display: none !important; }
-            .print-only { display: block !important; }
-            .page-break { page-break-before: always; }
-            
-            .pdf-header { border-bottom: 2px solid #0f172a; margin-bottom: 20px; padding-bottom: 15px; }
-            .pdf-section-title { background: #f1f5f9; padding: 8px 12px; font-weight: 800; text-transform: uppercase; margin-top: 20px; border-left: 4px solid #0f172a; }
-            
-            .pdf-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            .pdf-table th { background: #f8fafc; text-align: left; padding: 8px; border: 1px solid #e2e8f0; font-size: 9pt; text-transform: uppercase; }
-            .pdf-table td { padding: 8px; border: 1px solid #e2e8f0; vertical-align: top; }
-            
-            .photo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
-            .photo-item { width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 4px; }
-            
-            .signature-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; page-break-inside: avoid; }
-            .signature-box { border: 1px solid #e2e8f0; border-top: 2px solid #0f172a; height: 160px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; background: #fafafa; }
-        }
-        .print-only { display: none; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+// --- CONFIGURATION FIREBASE ---
+// Note: Si la clé API est invalide dans cet environnement, l'app passera en mode "Local"
+const firebaseConfig = {
+  apiKey: "AIzaSyDFm8IK-WL0T4U5n8SNKxS6aE6ePU807_c",
+  authDomain: "link-immo-drumet.firebaseapp.com",
+  projectId: "link-immo-drumet",
+  storageBucket: "link-immo-drumet.firebasestorage.app",
+  messagingSenderId: "817653872182",
+  appId: "1:817653872182:web:9c897b78732397464f8a97"
+};
 
-    <script type="text/babel">
-        const { useState, useEffect, useRef, useCallback } = React;
+const appId = 'link-immo-drumet-app';
+
+// --- UTILITAIRES ---
+const resizeImage = (file) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800;
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+    };
+  });
+};
+
+// --- COMPOSANT SIGNATURE ---
+const SignaturePad = ({ label, onSave, savedImage }) => {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasContent, setHasContent] = useState(false);
+
+  useEffect(() => {
+    if (savedImage || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    
+    const getPos = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    };
+    const start = (e) => { setIsDrawing(true); setHasContent(true); const pos = getPos(e); ctx.beginPath(); ctx.moveTo(pos.x, pos.y); };
+    const move = (e) => { if (!isDrawing) return; e.preventDefault(); const pos = getPos(e); ctx.lineTo(pos.x, pos.y); ctx.stroke(); };
+    const stop = () => setIsDrawing(false);
+
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+    canvas.addEventListener('touchstart', start, {passive: false});
+    canvas.addEventListener('touchmove', move, {passive: false});
+    canvas.addEventListener('touchend', stop);
+    return () => {
+      canvas.removeEventListener('mousedown', start);
+      canvas.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
+      canvas.removeEventListener('touchstart', start);
+      canvas.removeEventListener('touchmove', move);
+      canvas.removeEventListener('touchend', stop);
+    };
+  }, [isDrawing, savedImage]);
+
+  if (savedImage) {
+    return (
+      <div className="bg-white p-4 rounded-3xl border-2 border-emerald-100 shadow-sm relative">
+        <p className="text-[10px] font-black text-emerald-600 uppercase mb-2 tracking-widest">{label} - SIGNÉ</p>
+        <img src={savedImage} className="h-32 w-full object-contain mx-auto" alt="Signature" />
+        <button onClick={() => onSave(null)} className="absolute top-2 right-2 p-2 bg-slate-100 rounded-full text-slate-400">
+          <RotateCcw size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider text-left pl-2">{label}</p>
+      <div className="bg-white border-2 border-slate-200 rounded-3xl overflow-hidden shadow-inner relative h-48">
+        <canvas ref={canvasRef} width={400} height={200} className="w-full h-full cursor-crosshair" />
+        <div className="absolute bottom-4 left-0 right-0 pointer-events-none text-center">
+          <span className="text-[9px] text-slate-300 font-bold uppercase tracking-tighter italic">Signez ici</span>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => {
+          const ctx = canvasRef.current.getContext('2d');
+          ctx.clearRect(0,0,canvasRef.current.width,canvasRef.current.height);
+          setHasContent(false);
+        }} className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase">Effacer</button>
+        <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} 
+                className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all ${hasContent ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+          Valider
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- COMPOSANT PRINCIPAL ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [step, setStep] = useState(1);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('idle'); 
+  const [activeTarget, setActiveTarget] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // Services Firebase (initialisés dynamiquement pour éviter le crash)
+  const [services, setServices] = useState({ auth: null, db: null, available: false });
+
+  const [formData, setFormData] = useState({
+    property: { address: 'Drumettaz-Clarafond', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
+    rooms: [{ id: 1, name: 'Pièce Principale', elements: [{ id: 101, label: 'Murs et Plafonds', status: 'Bon', photos: [], comment: '' }] }],
+    signatures: { owner: null, tenant: null }
+  });
+
+  // (1) Initialisation sécurisée
+  useEffect(() => {
+    try {
+      const fbApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+      const fbAuth = getAuth(fbApp);
+      const fbDb = getFirestore(fbApp);
+      setServices({ auth: fbAuth, db: fbDb, available: true });
+    } catch (err) {
+      console.error("Firebase init bypass:", err);
+      setSyncStatus('error');
+    }
+  }, []);
+
+  // (2) Authentification avec gestion d'erreur clé API
+  useEffect(() => {
+    if (!services.available || !services.auth) return;
+
+    let isMounted = true;
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(services.auth);
+      } catch (err) {
+        if (isMounted) {
+          console.warn("Auth Bypass (Mode Local activé)");
+          setSyncStatus('error'); // Signale le mode local
+        }
+      }
+    };
+
+    initAuth();
+    const unsubscribe = onAuthStateChanged(services.auth, (u) => {
+      if (isMounted && u) setUser(u);
+    });
+    
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [services]);
+
+  // (3) Cloud Sync - Uniquement si auth ok
+  useEffect(() => {
+    if (!user || !services.db || syncStatus === 'error') return;
+    
+    const docRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'settings', 'current_report');
+    
+    // Premier chargement
+    getDoc(docRef).then(snap => {
+      if (snap.exists()) setFormData(snap.data());
+    }).catch(e => console.log("Local mode only"));
+
+    // Auto-save
+    const timer = setTimeout(async () => {
+      setSyncStatus('syncing');
+      try {
+        await setDoc(docRef, formData);
+        setSyncStatus('saved');
+        setTimeout(() => setSyncStatus('idle'), 2000);
+      } catch (err) {
+        setSyncStatus('error');
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [formData, user, services, syncStatus]);
+
+  const handlePhoto = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !activeTarget) return;
+    setIsProcessing(true);
+    try {
+      const compressedImage = await resizeImage(file);
+      const newRooms = formData.rooms.map(r => r.id === activeTarget.roomId ? {
+        ...r, elements: r.elements.map(el => el.id === activeTarget.elementId ? {
+          ...el, photos: [...el.photos, compressedImage]
+        } : el)
+      } : r);
+      setFormData({...formData, rooms: newRooms});
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center font-sans">
+      <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhoto} className="hidden" />
+      
+      {isProcessing && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl space-y-4 text-center">
+            <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mx-auto" />
+            <p className="text-xs font-black uppercase tracking-widest text-slate-600">Traitement...</p>
+          </div>
+        </div>
+      )}
+
+      <div className="w-full max-w-lg bg-white min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
         
-        const Icon = ({ name, size = 20, className = "" }) => {
-            const iconRef = useRef(null);
-            useEffect(() => {
-                if (window.lucide && iconRef.current) {
-                    iconRef.current.innerHTML = '';
-                    window.lucide.createIcons({
-                        icons: { [name]: window.lucide.icons[name] },
-                        attrs: { strokeWidth: 2, width: size, height: size, class: className }
-                    });
-                }
-            }, [name, size, className]);
-            return <i data-lucide={name} ref={iconRef} className="inline-block"></i>;
-        };
-
-        // Utilitaire pour compresser l'image et éviter l'écran blanc
-        const resizeImage = (file) => {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.src = event.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 800;
-                        const MAX_HEIGHT = 800;
-                        let width = img.width;
-                        let height = img.height;
-
-                        if (width > height) {
-                            if (width > MAX_WIDTH) {
-                                height *= MAX_WIDTH / width;
-                                width = MAX_WIDTH;
-                            }
-                        } else {
-                            if (height > MAX_HEIGHT) {
-                                width *= MAX_HEIGHT / height;
-                                height = MAX_HEIGHT;
-                            }
-                        }
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, width, height);
-                        // Qualité JPEG à 0.7 pour réduire considérablement le poids
-                        resolve(canvas.toDataURL('image/jpeg', 0.7));
-                    };
-                };
-            });
-        };
-
-        const SignaturePad = ({ label, onSave, savedImage }) => {
-            const canvasRef = useRef(null);
-            const [isDrawing, setIsDrawing] = useState(false);
-            const [hasContent, setHasContent] = useState(false);
-
-            useEffect(() => {
-                if (savedImage || !canvasRef.current) return;
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext('2d');
-                ctx.strokeStyle = '#0f172a';
-                ctx.lineWidth = 2.5;
-                ctx.lineCap = 'round';
-                
-                const getPos = (e) => {
-                    const rect = canvas.getBoundingClientRect();
-                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                    return { x: clientX - rect.left, y: clientY - rect.top };
-                };
-                const start = (e) => { setIsDrawing(true); setHasContent(true); const pos = getPos(e); ctx.beginPath(); ctx.moveTo(pos.x, pos.y); };
-                const move = (e) => { if (!isDrawing) return; e.preventDefault(); const pos = getPos(e); ctx.lineTo(pos.x, pos.y); ctx.stroke(); };
-                const stop = () => setIsDrawing(false);
-
-                canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); window.addEventListener('mouseup', stop);
-                canvas.addEventListener('touchstart', start, {passive: false}); canvas.addEventListener('touchmove', move, {passive: false}); canvas.addEventListener('touchend', stop);
-                return () => {
-                    canvas.removeEventListener('mousedown', start); canvas.removeEventListener('mousemove', move); window.addEventListener('mouseup', stop);
-                    canvas.removeEventListener('touchstart', start); canvas.removeEventListener('touchmove', move); canvas.removeEventListener('touchend', stop);
-                };
-            }, [isDrawing, savedImage]);
-
-            if (savedImage) {
-                return (
-                    <div className="bg-white p-4 rounded-3xl border-2 border-emerald-100 shadow-sm relative">
-                        <p className="text-[10px] font-black text-emerald-600 uppercase mb-2 tracking-widest">{label} - SIGNÉ</p>
-                        <img src={savedImage} className="h-32 w-full object-contain mx-auto" />
-                        <button onClick={() => onSave(null)} className="absolute top-2 right-2 p-2 bg-slate-100 rounded-full text-slate-400">
-                            <Icon name="rotate-ccw" size={14} />
-                        </button>
-                    </div>
-                );
-            }
-
-            return (
-                <div className="space-y-3">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider text-left pl-2">{label}</p>
-                    <div className="bg-white border-2 border-slate-200 rounded-3xl overflow-hidden shadow-inner relative h-48">
-                        <canvas ref={canvasRef} width={400} height={200} className="w-full h-full cursor-crosshair" />
-                        <div className="absolute bottom-4 left-0 right-0 pointer-events-none text-center">
-                            <span className="text-[9px] text-slate-300 font-bold uppercase tracking-tighter italic">Signez ici</span>
-                        </div>
-                    </div>
-                    <div className="flex gap-2">
-                        <button onClick={() => {
-                            const ctx = canvasRef.current.getContext('2d');
-                            ctx.clearRect(0,0,canvasRef.current.width,canvasRef.current.height);
-                            setHasContent(false);
-                        }} className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase">Effacer</button>
-                        <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} 
-                                className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all ${hasContent ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
-                            Valider
-                        </button>
-                    </div>
+        <header className="bg-slate-900 p-6 text-white sticky top-0 z-20 flex justify-between items-center shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 p-2 rounded-xl shadow-lg shadow-blue-900/20"><Home size={20} /></div>
+            <div>
+              <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Immo-Alex</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[9px] text-blue-400 font-bold uppercase tracking-widest">Drumettaz</span>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-800 rounded-full">
+                  {syncStatus === 'syncing' && <RefreshCw size={10} className="animate-spin text-blue-400" />}
+                  {syncStatus === 'saved' && <Cloud size={10} className="text-emerald-400" />}
+                  {syncStatus === 'error' && <WifiOff size={10} className="text-amber-400" />}
+                  {syncStatus === 'idle' && <Cloud size={10} className="text-slate-600" />}
+                  <span className="text-[8px] font-bold uppercase text-slate-400">
+                    {syncStatus === 'error' ? 'HORS-LIGNE' : syncStatus === 'syncing' ? 'Synchro...' : 'Cloud'}
+                  </span>
                 </div>
-            );
-        };
+              </div>
+            </div>
+          </div>
+          <div className="bg-slate-800 px-3 py-1 rounded-full text-[10px] font-black text-slate-400 uppercase">
+            Étape {step}/4
+          </div>
+        </header>
 
-        const App = () => {
-            const [step, setStep] = useState(1);
-            const fileInputRef = useRef(null);
-            const [activeTarget, setActiveTarget] = useState(null);
-            const [isProcessing, setIsProcessing] = useState(false);
-            const [shareStatus, setShareStatus] = useState(null);
-            
-            const [formData, setFormData] = useState(() => {
-                const saved = localStorage.getItem('immo_alex_drumettaz_v4');
-                return saved ? JSON.parse(saved) : {
-                    property: { address: 'Drumettaz-Clarafond', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
-                    rooms: [{ id: 1, name: 'Pièce Principale', elements: [{ id: 101, label: 'Murs et Plafonds', status: 'Bon', photos: [], comment: '' }] }],
-                    signatures: { owner: null, tenant: null }
-                };
-            });
+        <main className="flex-1 p-6 pb-32">
+          {syncStatus === 'error' && (
+            <div className="mb-6 p-4 bg-amber-50 border-2 border-amber-100 rounded-2xl flex items-center gap-3">
+              <AlertCircle className="text-amber-500 shrink-0" size={20} />
+              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-tight leading-tight">
+                Mode Local Activé : Cloud indisponible (Clé API). Vos données restent dans le navigateur.
+              </p>
+            </div>
+          )}
 
-            useEffect(() => {
-                // On essaie de sauvegarder, mais si c'est trop gros pour localStorage, on ne bloque pas l'appli
-                try {
-                    localStorage.setItem('immo_alex_drumettaz_v4', JSON.stringify(formData));
-                } catch (e) {
-                    console.warn("Stockage local saturé.");
-                }
-                if (window.lucide) window.lucide.createIcons();
-            }, [formData, step]);
-
-            const handlePhoto = async (e) => {
-                const file = e.target.files[0];
-                if (!file || !activeTarget) return;
-                
-                setIsProcessing(true);
-                try {
-                    const compressedImage = await resizeImage(file);
-                    const newRooms = formData.rooms.map(r => r.id === activeTarget.roomId ? {
-                        ...r, elements: r.elements.map(el => el.id === activeTarget.elementId ? {
-                            ...el, photos: [...el.photos, compressedImage]
-                        } : el)
-                    } : r);
-                    setFormData({...formData, rooms: newRooms});
-                } catch (err) {
-                    console.error("Erreur compression:", err);
-                } finally {
-                    setIsProcessing(false);
-                }
-            };
-
-            const handleShare = async () => {
-                const text = `État des lieux Immo-Alex's\n` +
-                             `Adresse : ${formData.property.address}\n` +
-                             `Propriétaire : ${formData.property.owner}\n` +
-                             `Locataire : ${formData.property.tenant}\n` +
-                             `Date : ${formData.property.date}\n` +
-                             `Document finalisé et signé.`;
-
-                if (navigator.share) {
-                    try {
-                        await navigator.share({
-                            title: 'État des Lieux',
-                            text: text,
-                            url: window.location.href
-                        });
-                        setShareStatus('success');
-                    } catch (err) {
-                        setShareStatus('error');
-                    }
-                } else {
-                    const dummy = document.createElement("textarea");
-                    document.body.appendChild(dummy);
-                    dummy.value = text;
-                    dummy.select();
-                    document.execCommand("copy");
-                    document.body.removeChild(dummy);
-                    setShareStatus('copied');
-                    setTimeout(() => setShareStatus(null), 2000);
-                }
-            };
-
-            return (
-                <div className="min-h-screen flex flex-col items-center pb-32">
-                    <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhoto} className="hidden" />
-                    
-                    {/* Loading Overlay */}
-                    {isProcessing && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center">
-                            <div className="bg-white p-6 rounded-3xl shadow-2xl text-center space-y-4">
-                                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                                <p className="text-xs font-bold uppercase tracking-widest text-slate-600">Compression de la photo...</p>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="w-full max-w-lg bg-white min-h-screen flex flex-col shadow-2xl relative main-container overflow-hidden">
-                        
-                        <header className="bg-slate-900 p-6 text-white sticky top-0 z-20 flex justify-between items-center shadow-xl no-print">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-blue-600 p-2 rounded-lg"><Icon name="home" size={20} /></div>
-                                <div>
-                                    <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Immo-Alex's</h1>
-                                    <span className="text-[9px] text-blue-400 font-bold uppercase tracking-[0.1em]">Rapport Drumettaz-Clarafond</span>
-                                </div>
-                            </div>
-                            <div className="bg-slate-800 px-3 py-1 rounded-full text-[10px] font-bold text-slate-400">
-                                {step}/4
-                            </div>
-                        </header>
-
-                        {/* PDF (uniquement impression) */}
-                        <div className="print-only p-8">
-                            <div className="pdf-header flex justify-between items-start">
-                                <div>
-                                    <h1 className="text-2xl font-black uppercase text-slate-900">État des Lieux</h1>
-                                    <p className="text-blue-600 font-bold uppercase text-[10px] mt-1 tracking-widest">Immo-Alex's Immobilier</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Émis le</p>
-                                    <p className="font-bold">{formData.property.date}</p>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4 mb-8">
-                                <div>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Localisation</p>
-                                    <p className="text-xs font-bold leading-tight">{formData.property.address}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Propriétaire</p>
-                                    <p className="text-xs font-bold leading-tight">{formData.property.owner || '—'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Locataire</p>
-                                    <p className="text-xs font-bold leading-tight">{formData.property.tenant || '—'}</p>
-                                </div>
-                            </div>
-                            {formData.rooms.map((room, rIdx) => (
-                                <div key={room.id} className={`${rIdx > 0 ? 'page-break' : ''}`}>
-                                    <div className="pdf-section-title">{room.name}</div>
-                                    <table className="pdf-table">
-                                        <thead>
-                                            <tr>
-                                                <th style={{width: '35%'}}>Élément</th>
-                                                <th style={{width: '15%'}}>État</th>
-                                                <th style={{width: '50%'}}>Observations</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {room.elements.map(el => (
-                                                <React.Fragment key={el.id}>
-                                                    <tr>
-                                                        <td className="font-bold text-xs uppercase">{el.label}</td>
-                                                        <td className="text-xs font-bold">{el.status.toUpperCase()}</td>
-                                                        <td className="text-[10px] text-slate-500">{el.comment || 'N/A'}</td>
-                                                    </tr>
-                                                    {el.photos.length > 0 && (
-                                                        <tr>
-                                                            <td colSpan="3" style={{padding: '10px'}}>
-                                                                <div className="photo-grid">
-                                                                    {el.photos.map((p, i) => <img key={i} src={p} className="photo-item" />)}
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    )}
-                                                </React.Fragment>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ))}
-                        </div>
-
-                        <main className="flex-1 p-6 no-print">
-                            {step === 1 && (
-                                <div className="space-y-6">
-                                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter italic">1. Informations</h2>
-                                    <div className="space-y-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Adresse du bien</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none font-bold" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Bailleur</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom du propriétaire" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Locataire</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom du locataire" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {step === 2 && (
-                                <div className="space-y-6">
-                                    <div className="flex justify-between items-center">
-                                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">2. Inventaire</h2>
-                                        <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3 rounded-2xl shadow-lg"><Icon name="plus" size={20} /></button>
-                                    </div>
-                                    {formData.rooms.map(room => (
-                                        <div key={room.id} className="bg-slate-100 p-5 rounded-[2.5rem] mb-6">
-                                            <input className="font-black text-slate-900 bg-transparent outline-none w-full text-lg uppercase mb-4" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
-                                            <div className="space-y-4">
-                                                {room.elements.map(el => (
-                                                    <div key={el.id} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100">
-                                                        <input className="w-full font-bold text-slate-700 outline-none mb-3" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                                                        <div className="flex gap-1 mb-3">
-                                                            {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
-                                                                <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border-2 transition-all ${el.status === s ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-300 border-slate-50'}`}>{s.toUpperCase()}</button>
-                                                            ))}
-                                                        </div>
-                                                        <textarea className="w-full p-3 rounded-xl bg-slate-50 text-[10px] mb-3 outline-none" placeholder="Observation..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
-                                                        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                                                            <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-14 h-14 shrink-0 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400"><Icon name="camera" size={24} /></button>
-                                                            {el.photos.map((p, i) => (
-                                                                <div key={i} className="relative shrink-0">
-                                                                    <img src={p} className="w-14 h-14 object-cover rounded-xl border-2 border-white shadow-sm" />
-                                                                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, idx) => idx !== i)} : e2)} : r)})} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><Icon name="x" size={8} /></button>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-2 text-[10px] font-black text-slate-400 border-2 border-dashed border-slate-200 rounded-xl uppercase">+ Ajouter un élément</button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {step === 3 && (
-                                <div className="space-y-8 pb-10">
-                                    <h2 className="text-xl font-black text-center uppercase tracking-tighter">3. Signatures</h2>
-                                    <div className="space-y-10">
-                                        <SignaturePad label="Signature du Bailleur" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
-                                        <SignaturePad label="Signature du Locataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} savedImage={formData.signatures.tenant} />
-                                    </div>
-                                </div>
-                            )}
-
-                            {step === 4 && (
-                                <div className="space-y-6 text-center py-10">
-                                    <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-white mx-auto shadow-2xl mb-4 animate-bounce"><Icon name="check" size={40} /></div>
-                                    <h2 className="text-2xl font-black uppercase tracking-tighter">Rapport Finalisé</h2>
-                                    <div className="space-y-3 pt-6">
-                                        <button onClick={() => window.print()} className="w-full py-6 bg-slate-900 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
-                                            <Icon name="file-text" size={24} /> GÉNÉRER LE PDF
-                                        </button>
-                                        <button onClick={handleShare} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
-                                            <Icon name="share-2" size={20} /> 
-                                            {shareStatus === 'copied' ? 'TEXTE COPIÉ !' : 'PARTAGER LE RAPPORT'}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </main>
-
-                        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-30 max-w-lg mx-auto rounded-t-[2.5rem] no-print">
-                            {step > 1 && (
-                                <button onClick={() => setStep(s => s - 1)} className="p-6 rounded-3xl bg-slate-50 text-slate-400 active:bg-slate-100 transition-all"><Icon name="arrow-left" size={24} /></button>
-                            )}
-                            {step < 4 && (
-                                <button onClick={() => setStep(s => s + 1)} className="flex-1 py-6 rounded-3xl bg-slate-900 text-white font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all uppercase tracking-widest text-xs">
-                                    {step === 3 ? 'Finaliser' : 'Suivant'} <Icon name="chevron-right" size={20} />
-                                </button>
-                            )}
-                        </footer>
-                    </div>
+          {step === 1 && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter border-l-4 border-blue-600 pl-3 italic">1. Informations</h2>
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Adresse</label>
+                  <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none font-bold" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} />
                 </div>
-            );
-        };
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm" placeholder="Bailleur" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
+                  <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm" placeholder="Locataire" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
+                </div>
+              </div>
+            </div>
+          )}
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+          {step === 2 && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter border-l-4 border-blue-600 pl-3">2. Inventaire</h2>
+                <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3 rounded-2xl shadow-lg active:scale-90 transition-transform"><Plus size={20} /></button>
+              </div>
+              
+              {formData.rooms.map(room => (
+                <div key={room.id} className="bg-slate-100 p-5 rounded-[2.5rem] mb-8 border border-slate-200">
+                  <input className="font-black text-slate-900 bg-transparent outline-none w-full text-lg uppercase mb-4" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                  <div className="space-y-4">
+                    {room.elements.map(el => (
+                      <div key={el.id} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200/50">
+                        <div className="flex justify-between items-center mb-3">
+                          <input className="font-bold text-slate-700 outline-none flex-1" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                          <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.filter(e2 => e2.id !== el.id)} : r)})} className="text-slate-300"><X size={14}/></button>
+                        </div>
+                        <div className="flex gap-1 mb-3">
+                          {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
+                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border-2 ${el.status === s ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-300 border-slate-100'}`}>{s.toUpperCase()}</button>
+                          ))}
+                        </div>
+                        <textarea className="w-full p-3 rounded-xl bg-slate-50 text-[10px] mb-3 outline-none" placeholder="Observation..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+                        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                          <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-16 h-16 shrink-0 bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl flex items-center justify-center text-blue-400"><Camera size={24} /></button>
+                          {el.photos.map((p, i) => (
+                            <div key={i} className="relative shrink-0">
+                              <img src={p} className="w-16 h-16 object-cover rounded-2xl border-2 border-white shadow-md" alt="Aperçu" />
+                              <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, idx) => idx !== i)} : e2)} : r)})} className="absolute -top-2 -right-2 bg-slate-900 text-white rounded-full p-1"><X size={10} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-3 text-[10px] font-black text-blue-600 bg-blue-50 border-2 border-dashed border-blue-100 rounded-2xl uppercase">+ Ajouter</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-8 animate-in slide-in-from-right duration-300">
+              <h2 className="text-xl font-black text-center uppercase tracking-tighter border-b-2 border-slate-100 pb-4 italic">3. Signatures</h2>
+              <div className="space-y-10">
+                <SignaturePad label="Le Bailleur" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
+                <SignaturePad label="Le Locataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} savedImage={formData.signatures.tenant} />
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-8 text-center animate-in zoom-in duration-300 py-10">
+              <div className="relative mx-auto w-24 h-24">
+                  <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-20"></div>
+                  <div className="relative w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-2xl"><Check size={48} /></div>
+              </div>
+              <h2 className="text-2xl font-black uppercase tracking-tighter">Terminé</h2>
+              <div className="space-y-4 pt-6 px-4">
+                <button onClick={() => window.print()} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all">
+                  <FileText size={24} /> GÉNÉRER LE PDF
+                </button>
+                <button onClick={() => {
+                    const text = `État des lieux : ${formData.property.address}`;
+                    if(navigator.share) navigator.share({ title: 'Rapport Immo-Alex', text });
+                }} className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
+                  <Share2 size={20} /> PARTAGER
+                </button>
+              </div>
+            </div>
+          )}
+        </main>
+
+        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-40 max-w-lg mx-auto rounded-t-[3rem] no-print">
+          {step > 1 && (
+            <button onClick={() => setStep(s => s - 1)} className="p-6 rounded-[2rem] bg-slate-100 text-slate-500 active:bg-slate-200 transition-all"><ArrowLeft size={24} /></button>
+          )}
+          {step < 4 && (
+            <button onClick={() => setStep(s => s + 1)} className="flex-1 py-6 rounded-[2rem] bg-slate-900 text-white font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all uppercase tracking-[0.2em] text-[10px]">
+              {step === 3 ? 'Finaliser' : 'Suivant'} <ChevronRight size={20} />
+            </button>
+          )}
+        </footer>
+      </div>
+      
+      <style>{`
+        @media print {
+            @page { size: A4; margin: 1.5cm; }
+            body { background: white !important; }
+            .no-print { display: none !important; }
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+      `}</style>
+    </div>
+  );
+}
