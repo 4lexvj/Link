@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>ImmoAlex's - État des Lieux Pro</title>
+    <title>Immo-Alex - Drumettaz-Clarafond</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -20,7 +20,7 @@
 
         @media print {
             @page { size: A4; margin: 1.5cm; }
-            body { background: white !important; }
+            body { background: white !important; -webkit-print-color-adjust: exact; }
             .no-print { display: none !important; }
             .print-only { display: block !important; }
             .page-break { page-break-before: always; }
@@ -28,7 +28,7 @@
             header { border-bottom: 3px solid #0f172a; margin-bottom: 20px; padding-bottom: 10px; }
             .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
             .photo-item { width: 100%; height: 120px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 4px; }
-            .signature-box { border: 1px solid #cbd5e1; height: 120px; padding: 10px; text-align: center; }
+            .signature-box { border: 1px solid #cbd5e1; height: 140px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; }
         }
         .print-only { display: none; }
     </style>
@@ -53,7 +53,6 @@
             return <i data-lucide={name} ref={iconRef} className="inline-block"></i>;
         };
 
-        // Composant de signature réutilisable
         const SignaturePad = ({ label, onSave, savedImage }) => {
             const canvasRef = useRef(null);
             const [isDrawing, setIsDrawing] = useState(false);
@@ -87,7 +86,7 @@
 
             if (savedImage) {
                 return (
-                    <div className="bg-white p-4 rounded-3xl border-2 border-emerald-100 shadow-sm relative group">
+                    <div className="bg-white p-4 rounded-3xl border-2 border-emerald-100 shadow-sm relative">
                         <p className="text-[10px] font-black text-emerald-600 uppercase mb-2 tracking-widest">{label} - SIGNÉ</p>
                         <img src={savedImage} className="h-32 w-full object-contain mx-auto" />
                         <button onClick={() => onSave(null)} className="absolute top-2 right-2 p-2 bg-slate-100 rounded-full text-slate-400">
@@ -103,7 +102,7 @@
                     <div className="bg-white border-2 border-slate-200 rounded-3xl overflow-hidden shadow-inner relative h-48">
                         <canvas ref={canvasRef} width={400} height={200} className="w-full h-full cursor-crosshair" />
                         <div className="absolute bottom-4 left-0 right-0 pointer-events-none text-center">
-                            <span className="text-[9px] text-slate-300 font-bold uppercase tracking-tighter italic">Signature {label} ici</span>
+                            <span className="text-[9px] text-slate-300 font-bold uppercase tracking-tighter italic">Signez ici</span>
                         </div>
                     </div>
                     <div className="flex gap-2">
@@ -114,7 +113,7 @@
                         }} className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase">Effacer</button>
                         <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} 
                                 className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all ${hasContent ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
-                            Valider Signature
+                            Valider
                         </button>
                     </div>
                 </div>
@@ -127,16 +126,16 @@
             const [activeTarget, setActiveTarget] = useState(null);
             
             const [formData, setFormData] = useState(() => {
-                const saved = localStorage.getItem('immo_alex_v2');
+                const saved = localStorage.getItem('immo_alex_drumettaz_v3');
                 return saved ? JSON.parse(saved) : {
-                    property: { address: '', owner: '', tenant: '' },
-                    rooms: [{ id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte d\'entrée', status: 'Bon', photos: [], comment: '' }] }],
+                    property: { address: 'Drumettaz-Clarafond', owner: '', tenant: '' },
+                    rooms: [{ id: 1, name: 'Séjour', elements: [{ id: 101, label: 'Murs et Plafonds', status: 'Bon', photos: [], comment: '' }] }],
                     signatures: { owner: null, tenant: null }
                 };
             });
 
             useEffect(() => {
-                localStorage.setItem('immo_alex_v2', JSON.stringify(formData));
+                localStorage.setItem('immo_alex_drumettaz_v3', JSON.stringify(formData));
                 if (window.lucide) window.lucide.createIcons();
             }, [formData, step]);
 
@@ -161,48 +160,48 @@
                     
                     <div className="w-full max-w-lg bg-white min-h-screen flex flex-col shadow-2xl relative main-container overflow-hidden">
                         
-                        {/* HEADER */}
+                        {/* Header */}
                         <header className="bg-slate-900 p-6 text-white sticky top-0 z-20 flex justify-between items-center shadow-xl">
                             <div className="flex items-center gap-3">
                                 <div className="bg-blue-600 p-2 rounded-lg"><Icon name="home" size={20} /></div>
                                 <div>
-                                    <h1 className="text-lg font-black tracking-tighter uppercase leading-none">ImmoAlex's</h1>
-                                    <span className="text-[9px] text-blue-400 font-bold uppercase tracking-[0.2em]">Expertise Immobilière</span>
+                                    <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Immo-Alex's</h1>
+                                    <span className="text-[9px] text-blue-400 font-bold uppercase tracking-[0.1em]">Appartement Drumettaz-Clarafond</span>
                                 </div>
                             </div>
-                            <div className="print-only text-slate-900 text-right">
-                                <p className="font-bold text-sm">RAPPORT D'ÉTAT DES LIEUX</p>
-                                <p className="text-[10px]">{new Date().toLocaleDateString('fr-FR')}</p>
-                            </div>
                             <div className="no-print bg-slate-800 px-3 py-1 rounded-full text-[10px] font-bold text-slate-400">
-                                ÉTAPE {step}/4
+                                {step}/4
                             </div>
                         </header>
 
-                        {/* VUE IMPRESSION PDF */}
+                        {/* PDF Content */}
                         <div className="print-only p-10 space-y-8">
-                            <div className="grid grid-cols-2 gap-4 border-b-2 border-slate-900 pb-6">
+                            <div className="border-b-2 border-slate-900 pb-6">
+                                <h2 className="text-[10px] font-black text-blue-600 uppercase mb-1">ÉTAT DES LIEUX DE SORTIE / ENTRÉE</h2>
+                                <p className="text-xl font-black">Appartement Drumettaz-Clarafond</p>
+                                <p className="text-sm text-slate-500 mt-2">{formData.property.address}</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-8 text-xs bg-slate-50 p-4 rounded-xl">
                                 <div>
-                                    <h2 className="text-[10px] font-black text-blue-600 uppercase mb-2 underline">Informations Bien</h2>
-                                    <p className="text-sm font-bold">{formData.property.address || 'Non spécifiée'}</p>
+                                    <p className="font-black text-blue-600 uppercase text-[9px] mb-1">Bailleur</p>
+                                    <p className="font-bold">{formData.property.owner || '—'}</p>
                                 </div>
                                 <div>
-                                    <h2 className="text-[10px] font-black text-blue-600 uppercase mb-2 underline">Parties</h2>
-                                    <p className="text-xs"><strong>Bailleur:</strong> {formData.property.owner || 'N/A'}</p>
-                                    <p className="text-xs"><strong>Locataire:</strong> {formData.property.tenant || 'N/A'}</p>
+                                    <p className="font-black text-blue-600 uppercase text-[9px] mb-1">Locataire</p>
+                                    <p className="font-bold">{formData.property.tenant || '—'}</p>
                                 </div>
                             </div>
 
                             {formData.rooms.map(room => (
                                 <div key={room.id} className="page-break pt-4">
-                                    <h3 className="text-sm font-black bg-slate-900 text-white px-3 py-1.5 rounded inline-block mb-4">{room.name.toUpperCase()}</h3>
+                                    <h3 className="text-sm font-black bg-slate-900 text-white px-3 py-1.5 rounded inline-block mb-4 uppercase">{room.name}</h3>
                                     {room.elements.map(el => (
                                         <div key={el.id} className="card">
-                                            <div className="flex justify-between items-center mb-2">
+                                            <div className="flex justify-between items-center mb-2 border-b pb-1">
                                                 <span className="font-bold text-xs uppercase">{el.label}</span>
-                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded ${el.status === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>ÉTRAT : {el.status.toUpperCase()}</span>
+                                                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-100 text-blue-700 uppercase">État : {el.status}</span>
                                             </div>
-                                            {el.comment && <p className="text-[10px] italic text-slate-500 mb-2">Note: {el.comment}</p>}
                                             <div className="photo-grid">
                                                 {el.photos.map((p, i) => <img key={i} src={p} className="photo-item" />)}
                                             </div>
@@ -212,40 +211,35 @@
                             ))}
 
                             <div className="page-break pt-10">
-                                <h3 className="font-black text-sm uppercase mb-6 border-b pb-2">Clôture et Signatures</h3>
+                                <h3 className="text-xs font-black uppercase mb-4 border-b pb-2 text-blue-600">Signatures certifiées</h3>
                                 <div className="grid grid-cols-2 gap-8">
-                                    <div className="signature-box flex flex-col justify-between">
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Signature Bailleur</span>
-                                        {formData.signatures.owner && <img src={formData.signatures.owner} className="max-h-20 object-contain mx-auto" />}
-                                        <p className="text-[10px] font-bold mt-2">{formData.property.owner}</p>
+                                    <div className="signature-box">
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Signature du Bailleur</span>
+                                        {formData.signatures.owner && <img src={formData.signatures.owner} className="max-h-24 object-contain mx-auto" />}
+                                        <p className="text-[10px] font-bold mt-2 uppercase">{formData.property.owner}</p>
                                     </div>
-                                    <div className="signature-box flex flex-col justify-between">
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Signature Locataire</span>
-                                        {formData.signatures.tenant && <img src={formData.signatures.tenant} className="max-h-20 object-contain mx-auto" />}
-                                        <p className="text-[10px] font-bold mt-2">{formData.property.tenant}</p>
+                                    <div className="signature-box">
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Signature du Locataire</span>
+                                        {formData.signatures.tenant && <img src={formData.signatures.tenant} className="max-h-24 object-contain mx-auto" />}
+                                        <p className="text-[10px] font-bold mt-2 uppercase">{formData.property.tenant}</p>
                                     </div>
                                 </div>
-                                <p className="text-[8px] text-slate-400 mt-20 text-center uppercase tracking-widest italic">Document généré via ImmoAlex's - État des Lieux Numérique</p>
                             </div>
                         </div>
 
-                        {/* INTERFACE APP MOBILE */}
+                        {/* UI Sections */}
                         <main className="flex-1 p-6 no-print">
                             {step === 1 && (
                                 <div className="space-y-6">
-                                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Informations du Bien</h2>
-                                    <div className="space-y-5">
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 ml-2 uppercase">Localisation</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none transition-all" placeholder="Adresse complète" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} />
+                                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">1. Coordonnées</h2>
+                                    <div className="space-y-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Propriétaire / Bailleur</label>
+                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom complet" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
                                         </div>
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 ml-2 uppercase">Propriétaire / Bailleur</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none transition-all" placeholder="Nom du bailleur" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 ml-2 uppercase">Locataire(s)</label>
-                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none transition-all" placeholder="Nom du locataire entrant" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Locataire</label>
+                                            <input className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-blue-500 outline-none" placeholder="Nom complet" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
                                         </div>
                                     </div>
                                 </div>
@@ -253,30 +247,29 @@
 
                             {step === 2 && (
                                 <div className="space-y-6">
-                                    <div className="flex justify-between items-center py-2 sticky top-[72px] bg-white/80 backdrop-blur-md z-10">
-                                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Inventaire Pièces</h2>
-                                        <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3 rounded-2xl shadow-lg active:scale-95 transition-all"><Icon name="plus" size={20} /></button>
+                                    <div className="flex justify-between items-center">
+                                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">2. Inventaire</h2>
+                                        <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="bg-slate-900 text-white p-3 rounded-2xl shadow-lg"><Icon name="plus" size={20} /></button>
                                     </div>
-                                    
                                     {formData.rooms.map(room => (
-                                        <div key={room.id} className="bg-slate-50 p-5 rounded-[2.5rem] border border-slate-200 mb-8">
+                                        <div key={room.id} className="bg-slate-50 p-5 rounded-[2.5rem] border border-slate-200 mb-6">
                                             <input className="font-black text-slate-900 bg-transparent outline-none w-full text-lg uppercase mb-4" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
-                                            <div className="space-y-5">
+                                            <div className="space-y-4">
                                                 {room.elements.map(el => (
-                                                    <div key={el.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
-                                                        <input className="w-full font-black text-slate-700 outline-none mb-3 text-sm" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                                                        <div className="flex gap-1.5 mb-4">
+                                                    <div key={el.id} className="bg-white p-4 rounded-3xl shadow-sm">
+                                                        <input className="w-full font-bold text-slate-700 outline-none mb-2" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                        <div className="flex gap-2 mb-3">
                                                             {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
-                                                                <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2.5 rounded-xl text-[9px] font-black border-2 transition-all ${el.status === s ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-300 border-slate-50'}`}>{s.toUpperCase()}</button>
+                                                                <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border-2 transition-all ${el.status === s ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-300 border-slate-50'}`}>{s.toUpperCase()}</button>
                                                             ))}
                                                         </div>
-                                                        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                                                            <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-16 h-16 shrink-0 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center text-slate-400 active:bg-blue-50 active:text-blue-600 active:border-blue-200 transition-all"><Icon name="camera" size={24} /></button>
-                                                            {el.photos.map((p, i) => <img key={i} src={p} className="w-16 h-16 object-cover rounded-2xl border-2 border-white shadow-sm" />)}
+                                                        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                                                            <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-14 h-14 shrink-0 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400"><Icon name="camera" size={24} /></button>
+                                                            {el.photos.map((p, i) => <img key={i} src={p} className="w-14 h-14 object-cover rounded-xl border-2 border-white" />)}
                                                         </div>
                                                     </div>
                                                 ))}
-                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Élément...', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-3 text-[10px] font-black text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl uppercase tracking-widest">+ Ajouter un élément</button>
+                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Élément...', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-2 text-[10px] font-black text-slate-400 border-2 border-dashed border-slate-200 rounded-xl uppercase">+ Ajouter un élément</button>
                                             </div>
                                         </div>
                                     ))}
@@ -284,23 +277,16 @@
                             )}
 
                             {step === 3 && (
-                                <div className="space-y-8 animate-in pb-10">
-                                    <div className="text-center space-y-2">
-                                        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Signatures des Parties</h2>
-                                        <p className="text-xs text-slate-400">Le document doit être signé par le bailleur et le locataire.</p>
-                                    </div>
-
+                                <div className="space-y-8 pb-10">
+                                    <h2 className="text-xl font-black text-center uppercase tracking-tighter">3. Signatures</h2>
                                     <div className="space-y-10">
-                                        {/* Signature Bailleur */}
                                         <SignaturePad 
-                                            label="Bailleur / Propriétaire" 
+                                            label="Signature du Bailleur" 
                                             onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})}
                                             savedImage={formData.signatures.owner}
                                         />
-
-                                        {/* Signature Locataire */}
                                         <SignaturePad 
-                                            label="Locataire" 
+                                            label="Signature du Locataire" 
                                             onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})}
                                             savedImage={formData.signatures.tenant}
                                         />
@@ -309,47 +295,27 @@
                             )}
 
                             {step === 4 && (
-                                <div className="space-y-8 text-center animate-in">
-                                    <div className="w-24 h-24 bg-emerald-500 rounded-[2.5rem] flex items-center justify-center text-white mx-auto shadow-2xl shadow-emerald-200 rotate-3 animate-bounce">
-                                        <Icon name="check" size={48} />
-                                    </div>
+                                <div className="space-y-8 text-center py-10">
+                                    <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-white mx-auto shadow-2xl"><Icon name="check" size={40} /></div>
                                     <div className="space-y-2">
-                                        <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Dossier Complet</h2>
-                                        <p className="text-sm text-slate-400 px-6">L'état des lieux est prêt pour l'exportation en format PDF officiel.</p>
+                                        <h2 className="text-2xl font-black uppercase tracking-tighter">Terminé</h2>
+                                        <p className="text-sm text-slate-400 px-10">Votre état des lieux est complet et signé par les deux parties.</p>
                                     </div>
-
-                                    <div className="bg-slate-900 p-8 rounded-[3rem] text-left text-white shadow-2xl space-y-4">
-                                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                                            <span className="text-[10px] font-black text-blue-400 uppercase">Bien</span>
-                                            <span className="text-xs font-bold truncate max-w-[200px]">{formData.property.address || 'Non spécifiée'}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                                            <span className="text-[10px] font-black text-blue-400 uppercase">Signatures</span>
-                                            <div className="flex gap-2">
-                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded ${formData.signatures.owner ? 'bg-emerald-500' : 'bg-red-500'}`}>Bailleur</span>
-                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded ${formData.signatures.tenant ? 'bg-emerald-500' : 'bg-red-500'}`}>Locataire</span>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => window.print()} className="w-full py-5 bg-blue-600 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg shadow-blue-500/20">
-                                            <Icon name="file-text" size={20} /> Générer Rapport PDF
-                                        </button>
-                                    </div>
-                                    
-                                    <p className="text-[10px] text-slate-400 font-bold italic uppercase">Sélectionnez "Enregistrer au format PDF" dans les options d'impression de votre iPad.</p>
+                                    <button onClick={() => window.print()} className="w-full py-6 bg-slate-900 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
+                                        <Icon name="file-text" size={24} /> GÉNÉRER LE PDF FINAL
+                                    </button>
                                 </div>
                             )}
                         </main>
 
-                        {/* NAV FOOTER */}
-                        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-30 max-w-lg mx-auto rounded-t-[3rem] no-print">
+                        {/* Footer Nav */}
+                        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex justify-between gap-4 z-30 max-w-lg mx-auto rounded-t-[2.5rem] no-print">
                             {step > 1 && (
-                                <button onClick={() => setStep(s => s - 1)} className="p-6 rounded-3xl bg-slate-50 text-slate-400 active:bg-slate-100 transition-colors">
-                                    <Icon name="arrow-left" size={24} />
-                                </button>
+                                <button onClick={() => setStep(s => s - 1)} className="p-6 rounded-3xl bg-slate-50 text-slate-400 active:bg-slate-100 transition-all"><Icon name="arrow-left" size={24} /></button>
                             )}
                             {step < 4 && (
-                                <button onClick={() => setStep(s => s + 1)} className="flex-1 py-6 rounded-3xl bg-slate-900 text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
-                                    {step === 3 ? 'Finaliser le Dossier' : 'Étape Suivante'} <Icon name="chevron-right" size={20} />
+                                <button onClick={() => setStep(s => s + 1)} className="flex-1 py-6 rounded-3xl bg-slate-900 text-white font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all uppercase tracking-widest text-xs">
+                                    {step === 3 ? 'Finaliser' : 'Suivant'} <Icon name="chevron-right" size={20} />
                                 </button>
                             )}
                         </footer>
