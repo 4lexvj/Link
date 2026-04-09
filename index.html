@@ -16,21 +16,24 @@ import {
   Plus, Trash2, Camera, ChevronRight, 
   ChevronLeft, Loader2, X, Info, ClipboardList, 
   PenTool, Share2, RotateCcw, FileText, CheckCircle2,
-  ThumbsUp, CloudOff, WifiOff
+  ThumbsUp, WifiOff, AlertTriangle, Layers, User, Share
 } from 'lucide-react';
 
 // --- CONFIGURATION FIREBASE ---
-// Note: En mode aperçu, si la config est vide ou invalide, on passe en mode LocalStorage
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-local';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-default';
 
 let db = null;
 let auth = null;
 
 if (firebaseConfig) {
-  const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-  auth = getAuth(app);
-  db = getFirestore(app);
+  try {
+    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } catch (e) {
+    console.error("Firebase init failed", e);
+  }
 }
 
 // --- UTILITAIRES ---
@@ -125,10 +128,10 @@ const SignaturePad = ({ label, onSave, savedImage }) => {
       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-2">{label}</p>
       <div className="bg-white border-2 border-slate-200 rounded-3xl overflow-hidden shadow-inner h-48 relative">
         <canvas ref={canvasRef} width={400} height={200} className="w-full h-full touch-none cursor-crosshair" />
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5 font-black uppercase italic text-4xl">Signez ici</div>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5 font-black uppercase italic text-4xl text-center">Signez ici</div>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => { canvasRef.current.getContext('2d').clearRect(0,0,400,200); setHasContent(false); }} className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Effacer</button>
+        <button onClick={() => { canvasRef.current.getContext('2d').clearRect(0,0,400,200); setHasContent(false); }} className="px-4 text-[10px] font-bold text-slate-400 uppercase">Effacer</button>
         <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${hasContent ? 'bg-slate-900 text-white shadow-lg active:scale-95' : 'bg-slate-100 text-slate-300'}`}>Valider Signature</button>
       </div>
     </div>
@@ -139,11 +142,10 @@ const SignaturePad = ({ label, onSave, savedImage }) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [step, setStep] = useState(1);
-  const [syncStatus, setSyncStatus] = useState('local'); // 'local', 'saving', 'synced', 'error'
+  const [syncStatus, setSyncStatus] = useState('local'); 
   const fileInputRef = useRef(null);
   const [activeTarget, setActiveTarget] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showShareSuccess, setShowShareSuccess] = useState(false);
   
   const [formData, setFormData] = useState(() => {
     const saved = localStorage.getItem(`edl_data_${appId}`);
@@ -156,18 +158,12 @@ export default function App() {
     };
   });
 
-  // Sauvegarde locale systématique
   useEffect(() => {
     localStorage.setItem(`edl_data_${appId}`, JSON.stringify(formData));
   }, [formData]);
 
-  // Auth & Cloud Sync Logic
   useEffect(() => {
-    if (!auth || !db) {
-      setSyncStatus('local');
-      return;
-    }
-
+    if (!auth || !db) return;
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -175,45 +171,72 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (err) { 
-        setSyncStatus('local'); 
-      }
+      } catch (err) { setSyncStatus('local'); }
     };
     initAuth();
-    
-    const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (u) {
-        // Tentative de récupération Cloud si connecté
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inspections', 'current_edl');
-        onSnapshot(docRef, (snap) => {
-          if (snap.exists()) {
-            const cloudData = snap.data();
-            // On ne fusionne que si les données locales sont vides ou si on veut forcer
-            setSyncStatus('synced');
-          }
-        }, () => setSyncStatus('local'));
-      }
+      if (u) setSyncStatus('synced');
     });
-
-    return () => unsubscribeAuth();
+    return () => unsubscribe();
   }, []);
 
-  // Cloud Auto-Save
-  useEffect(() => {
-    if (!user || !db || syncStatus === 'local') return;
-    const timer = setTimeout(async () => {
-      setSyncStatus('saving');
-      try {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inspections', 'current_edl');
-        await setDoc(docRef, formData, { merge: true });
-        setSyncStatus('synced');
-      } catch (err) { 
-        setSyncStatus('local'); 
+  // --- LOGIQUE PARTAGE ---
+  const handleShare = async () => {
+    const shareData = {
+      title: `EDL - ${formData.property.address || 'Immo-Alex'}`,
+      text: `État des lieux pour le bien : ${formData.property.address}. Locataire : ${formData.property.tenant}.`,
+      url: window.location.href
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        // Fallback: copie du lien
+        const dummy = document.createElement('input');
+        document.body.appendChild(dummy);
+        dummy.value = window.location.href;
+        dummy.select();
+        document.execCommand('copy');
+        document.body.removeChild(dummy);
+        alert('Lien copié dans le presse-papier');
       }
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [formData, user]);
+    } catch (err) {
+      console.log('Erreur partage:', err);
+    }
+  };
+
+  // --- LOGIQUE D'AJOUT ---
+  const addRoom = () => {
+    const newRoom = {
+      id: Date.now(),
+      name: 'Nouvelle Pièce',
+      elements: []
+    };
+    setFormData(prev => ({ ...prev, rooms: [...prev.rooms, newRoom] }));
+  };
+
+  const addElement = (roomId) => {
+    const newElement = {
+      id: Date.now(),
+      label: 'Nouvel élément',
+      status: 'Bon',
+      comment: '',
+      photos: []
+    };
+    setFormData(prev => ({
+      ...prev,
+      rooms: prev.rooms.map(r => r.id === roomId ? { ...r, elements: [...r.elements, newElement] } : r)
+    }));
+  };
+
+  const removeElement = (roomId, elementId) => {
+    setFormData(prev => ({
+      ...prev,
+      rooms: prev.rooms.map(r => r.id === roomId ? { ...r, elements: r.elements.filter(el => el.id !== elementId) } : r)
+    }));
+  };
 
   const handlePhoto = async (e) => {
     const file = e.target.files[0];
@@ -235,219 +258,236 @@ export default function App() {
     }
   };
 
-  const handleShare = async () => {
-    const shareData = {
-      title: 'État des Lieux Immo-Alex',
-      text: `Rapport pour : ${formData.property.address || 'Adresse non spécifiée'}`,
-      url: window.location.href
-    };
-    if (navigator.share) {
-      try { await navigator.share(shareData); } catch (err) { copyToClipboard(); }
-    } else {
-      copyToClipboard();
-    }
-  };
-
-  const copyToClipboard = () => {
-    const el = document.createElement('textarea');
-    el.value = window.location.href;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-    setShowShareSuccess(true);
-    setTimeout(() => setShowShareSuccess(false), 3000);
-  };
-
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center font-sans pb-32">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100">
       <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
       
-      {/* Notifications & Loaders */}
-      {showShareSuccess && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in zoom-in duration-300">
-          <CheckCircle2 size={18} className="text-green-400" />
-          <span className="text-[10px] font-black uppercase tracking-widest">Lien copié !</span>
-        </div>
-      )}
-
-      {isProcessing && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center">
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-4">
-                <Loader2 className="animate-spin text-blue-600" size={32} />
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 tracking-tighter">Optimisation Image...</span>
-            </div>
-        </div>
-      )}
-
-      <div className="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
+      <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
         
-        {/* Header Amélioré */}
-        <header className="bg-slate-900 p-6 text-white sticky top-0 z-50 flex justify-between items-center shadow-lg">
-          <div>
-            <h1 className="text-xl font-black italic tracking-tighter flex items-center gap-2">
-              <ClipboardList size={22} className="text-blue-400" /> IMMO-ALEX
-            </h1>
-            <p className="text-[8px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-0.5">Expertise Immobilière</p>
-          </div>
-          
+        <header className="bg-white/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex justify-between items-center border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <button onClick={handleShare} className="p-2.5 bg-slate-800 rounded-xl text-blue-400 border border-slate-700 active:scale-90 transition-transform">
-              <Share2 size={18} />
+            <div className="bg-blue-600 p-2 rounded-xl text-white">
+              <ClipboardList size={20} />
+            </div>
+            <div>
+              <h1 className="text-sm font-black tracking-tighter uppercase italic text-slate-900">Immo-Alex's</h1>
+              <div className="flex items-center gap-1">
+                <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'synced' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                   {syncStatus === 'synced' ? 'Connecté' : 'Hors-ligne'}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleShare}
+              className="p-2.5 bg-slate-50 text-slate-400 rounded-xl active:bg-slate-100 transition-colors"
+              title="Partager le dossier"
+            >
+              <Share size={18} />
             </button>
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all duration-500 ${syncStatus === 'synced' ? 'bg-emerald-900/40 border-emerald-500/50' : 'bg-slate-800 border-slate-700'}`}>
-              {syncStatus === 'synced' ? (
-                <ThumbsUp size={12} className="text-emerald-400 animate-bounce" />
-              ) : syncStatus === 'saving' ? (
-                <Loader2 size={12} className="text-blue-400 animate-spin" />
-              ) : (
-                <WifiOff size={12} className="text-amber-500" />
-              )}
-              <span className={`text-[8px] font-black uppercase tracking-tighter ${syncStatus === 'synced' ? 'text-emerald-400' : 'text-amber-500'}`}>
-                {syncStatus === 'synced' ? 'CLOUD OK' : 'LOCAL'}
-              </span>
+            <div className="text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full uppercase italic">
+              {step}/3
             </div>
           </div>
         </header>
 
-        {/* Navigation Étapes */}
-        <nav className="flex border-b sticky top-[84px] bg-white/95 backdrop-blur-md z-40">
-          {[
-            { s: 1, i: <Info size={16} />, l: 'Infos' },
-            { s: 2, i: <ClipboardList size={16} />, l: 'Pièces' },
-            { s: 3, i: <PenTool size={16} />, l: 'Signer' }
-          ].map(btn => (
-            <button key={btn.s} onClick={() => setStep(btn.s)} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-all ${step === btn.s ? 'text-blue-600 border-b-4 border-blue-600 bg-blue-50/50' : 'text-slate-300'}`}>
-              {btn.i}
-              <span className="text-[8px] font-black uppercase tracking-widest">{btn.l}</span>
-            </button>
+        <div className="flex px-4 pt-4 gap-2">
+          {[1, 2, 3].map(s => (
+            <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-blue-600' : 'bg-slate-100'}`}></div>
           ))}
-        </nav>
+        </div>
 
-        {/* Contenu Principal */}
-        <main className="p-6 flex-1">
+        <main className="p-6 flex-1 pb-32">
           {step === 1 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-200 shadow-inner">
-                <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest pl-1">Adresse du bien</label>
-                <textarea 
-                  rows="2"
-                  className="w-full bg-transparent text-lg font-bold outline-none text-slate-800 resize-none" 
-                  value={formData.property.address} 
-                  onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} 
-                  placeholder="Ex: 12 Rue du Lac, Drumettaz..." 
-                />
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-slate-900 uppercase italic">Le Bien & Parties.</h2>
+                <p className="text-sm text-slate-500 font-medium">Informations essentielles du dossier.</p>
               </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-200">
-                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-tighter">Propriétaire / Bailleur</label>
-                  <input className="w-full bg-transparent font-bold outline-none text-slate-800" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} placeholder="Nom et Prénom" />
+
+              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-5">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest pl-1">Adresse du Bien</label>
+                  <textarea 
+                    className="w-full bg-transparent text-base font-bold outline-none text-slate-800 resize-none placeholder:text-slate-300" 
+                    rows="2"
+                    value={formData.property.address} 
+                    onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} 
+                    placeholder="Ex: 15 Rue de la Liberté, 73000 Chambéry" 
+                  />
                 </div>
-                <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-200">
-                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-tighter">Locataire entrant</label>
-                  <input className="w-full bg-transparent font-bold outline-none text-slate-800" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} placeholder="Nom et Prénom" />
+                
+                <div className="h-px bg-slate-200"></div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest pl-1">Propriétaire / Mandataire</label>
+                  <input 
+                    className="w-full bg-transparent font-bold outline-none text-slate-800 placeholder:text-slate-300" 
+                    value={formData.property.owner} 
+                    onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} 
+                    placeholder="Nom du propriétaire..." 
+                  />
+                </div>
+
+                <div className="h-px bg-slate-200"></div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest pl-1">Locataire entrant</label>
+                  <input 
+                    className="w-full bg-transparent font-bold outline-none text-slate-800 placeholder:text-slate-300" 
+                    value={formData.property.tenant} 
+                    onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} 
+                    placeholder="Nom du locataire..." 
+                  />
+                </div>
+
+                <div className="h-px bg-slate-200"></div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest pl-1">Date de visite</label>
+                  <input 
+                    type="text"
+                    className="w-full bg-transparent font-bold outline-none text-slate-800" 
+                    value={formData.property.date} 
+                    onChange={e => setFormData({...formData, property: {...formData.property, date: e.target.value}})} 
+                  />
                 </div>
               </div>
             </div>
           )}
 
           {step === 2 && (
-            <div className="space-y-6 animate-in fade-in duration-500 pb-10">
+            <div className="space-y-6 animate-in fade-in duration-500">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-black text-slate-900 uppercase italic">Inventaire</h2>
+                <button 
+                  onClick={addRoom}
+                  className="bg-blue-600 text-white p-2 rounded-xl shadow-lg shadow-blue-100 active:scale-90 transition-transform"
+                >
+                  <Plus size={20} />
+                </button>
+              </div>
+
               {formData.rooms.map(room => (
-                <div key={room.id} className="bg-slate-50 p-4 rounded-[2.5rem] border border-slate-200 shadow-sm">
-                  <div className="flex justify-between items-center mb-4 pl-2">
+                <div key={room.id} className="bg-slate-50 rounded-[2.5rem] p-5 border border-slate-100 shadow-sm space-y-4 mb-6">
+                  <div className="flex justify-between items-center">
                     <input className="font-black text-blue-900 bg-transparent outline-none text-lg uppercase w-full" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
-                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== room.id)})} className="text-red-300 p-2"><Trash2 size={18} /></button>
+                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== room.id)})} className="text-slate-300 ml-2"><Trash2 size={16} /></button>
                   </div>
+                  
                   <div className="space-y-4">
                     {room.elements.map(el => (
-                      <div key={el.id} className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-                        <div className="flex justify-between items-center">
-                            <input className="font-bold text-slate-700 outline-none text-sm w-full" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                            <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.filter(e2 => e2.id !== el.id)} : r)})} className="text-slate-200 ml-2"><X size={14} /></button>
+                      <div key={el.id} className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm space-y-3">
+                        <div className="flex justify-between items-center gap-2">
+                          <input className="font-bold text-slate-700 outline-none text-xs w-full bg-slate-50 px-2 py-1 rounded-lg" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? { ...r, elements: r.elements.map(e2 => e2.id === el.id ? { ...e2, label: e.target.value } : e2) } : r)})} />
+                          <button onClick={() => removeElement(room.id, el.id)} className="text-slate-200 hover:text-red-400 transition-colors"><X size={14} /></button>
                         </div>
-                        <div className="flex gap-1.5">
+                        
+                        <div className="flex gap-1">
                           {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
-                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2.5 rounded-xl text-[8px] font-black border transition-all ${el.status === s ? 'bg-slate-900 text-white border-slate-900 shadow-md scale-105' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{s.toUpperCase()}</button>
+                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? { ...r, elements: r.elements.map(e2 => e2.id === el.id ? { ...e2, status: s } : e2) } : r)})} className={`flex-1 py-1.5 rounded-lg text-[7px] font-black border transition-all ${el.status === s ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{s.toUpperCase()}</button>
                           ))}
                         </div>
-                        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                          <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-16 h-16 shrink-0 bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl flex items-center justify-center text-blue-600 active:scale-90 transition-transform">
-                            <Camera size={22} />
-                          </button>
-                          {el.photos?.map((p, idx) => (
-                            <div key={idx} className="relative w-16 h-16 shrink-0 animate-in zoom-in">
-                               <img src={p} className="w-full h-full object-cover rounded-2xl border border-slate-200" alt="Photo élément" />
-                               <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, i) => i !== idx)} : e2)} : r)})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg">
-                                 <X size={10} />
+
+                        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                           <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-12 h-12 shrink-0 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 border border-blue-100 active:scale-90 transition-transform">
+                            <Camera size={18} />
+                           </button>
+                           {el.photos?.map((p, i) => (
+                             <div key={i} className="relative shrink-0">
+                               <img src={p} className="w-12 h-12 object-cover rounded-xl border border-slate-100" alt="Capture" />
+                               <button 
+                                onClick={() => setFormData(prev => ({
+                                  ...prev,
+                                  rooms: prev.rooms.map(r => r.id === room.id ? {
+                                    ...r, elements: r.elements.map(e2 => e2.id === el.id ? {
+                                      ...e2, photos: e2.photos.filter((_, idx) => idx !== i)
+                                    } : e2)
+                                  } : r)
+                                }))}
+                                className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-sm"
+                               >
+                                <X size={8} />
                                </button>
-                            </div>
-                          ))}
+                             </div>
+                           ))}
                         </div>
                       </div>
                     ))}
-                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément...', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-4 text-[10px] font-black text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl uppercase tracking-widest hover:bg-slate-100 transition-colors">+ Ajouter un élément</button>
+                    
+                    <button 
+                      onClick={() => addElement(room.id)}
+                      className="w-full py-3 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center gap-2 text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all active:scale-95"
+                    >
+                      <Plus size={14} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Ajouter un élément</span>
+                    </button>
                   </div>
                 </div>
               ))}
-              <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle Pièce', elements: []}]})} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-slate-200 border-4 border-slate-800"><Plus size={18} /> Nouvelle Pièce</button>
+              
+              {formData.rooms.length === 0 && (
+                <div className="py-20 text-center flex flex-col items-center opacity-30">
+                  <Layers size={48} className="text-slate-300 mb-4" />
+                  <p className="text-xs font-black uppercase tracking-widest">Aucune pièce ajoutée</p>
+                </div>
+              )}
             </div>
           )}
 
           {step === 3 && (
-            <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-              <div className="flex items-center gap-3 mb-6">
-                <PenTool size={24} className="text-blue-600" />
-                <h2 className="text-xl font-black text-slate-900 uppercase italic">Clôturer le rapport</h2>
+            <div className="space-y-6 animate-in fade-in duration-500">
+               <div className="space-y-2">
+                <h2 className="text-2xl font-black text-slate-900 uppercase italic">Validation.</h2>
+                <p className="text-sm text-slate-500 font-medium">Signature électronique des deux parties.</p>
               </div>
-              
-              <SignaturePad label="Bailleur / Mandataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
+              <SignaturePad label="Propriétaire / Mandataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
               <SignaturePad label="Locataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} savedImage={formData.signatures.tenant} />
-              
-              <div className="pt-8 border-t border-slate-100 space-y-4">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Exportation Pro</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => window.print()} className="py-5 bg-blue-600 text-white rounded-[2rem] font-black flex flex-col items-center justify-center gap-1 uppercase tracking-widest text-[9px] shadow-xl active:scale-95 transition-transform">
-                      <FileText size={20} /> PDF / IMPRIMER
-                    </button>
-                    <button onClick={handleShare} className="py-5 bg-slate-900 text-white rounded-[2rem] font-black flex flex-col items-center justify-center gap-1 uppercase tracking-widest text-[9px] shadow-xl active:scale-95 transition-transform">
-                      <Share2 size={20} /> PARTAGER LIEN
-                    </button>
-                  </div>
-              </div>
             </div>
           )}
         </main>
 
-        {/* Barre de Navigation Basse */}
-        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/95 backdrop-blur-xl border-t border-slate-100 flex gap-4 z-40 max-w-md mx-auto no-print shadow-[0_-20px_50px_rgba(0,0,0,0.1)] rounded-t-[2.5rem]">
+        <footer className="p-6 bg-white border-t border-slate-100 flex gap-4 sticky bottom-0 z-50 rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] no-print">
           {step > 1 && (
-            <button onClick={() => setStep(step - 1)} className="p-6 bg-slate-100 rounded-3xl border border-slate-200 text-slate-500 active:scale-90 transition-transform">
+            <button onClick={() => setStep(step - 1)} className="p-5 bg-slate-50 rounded-2xl text-slate-400 active:scale-90 transition-transform">
               <ChevronLeft size={24} />
             </button>
           )}
-          <button onClick={() => step < 3 && setStep(step + 1)} className="flex-1 py-6 bg-blue-600 text-white rounded-[2rem] font-black flex items-center justify-center gap-3 shadow-xl shadow-blue-100 uppercase tracking-widest text-[12px] active:scale-95 transition-transform">
-            {step === 3 ? 'TERMINER' : 'CONTINUER'} <ChevronRight size={20} />
+          <button onClick={() => step < 3 ? setStep(step + 1) : window.print()} className="flex-1 py-5 bg-blue-600 text-white rounded-[1.5rem] font-black uppercase text-xs tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-xl shadow-blue-200">
+            {step === 3 ? <FileText size={18} /> : null}
+            {step === 3 ? 'Finaliser et Imprimer' : 'Suivant'}
+            {step < 3 ? <ChevronRight size={18} /> : null}
           </button>
         </footer>
 
-        <style>{`
-          .no-scrollbar::-webkit-scrollbar { display: none; }
-          @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; }
-            .max-w-md { max-width: 100% !important; width: 100% !important; box-shadow: none !important; }
-            header, nav, footer { display: none !important; }
-            main { padding: 0 !important; }
-            .bg-slate-50, .bg-white { border: none !important; }
-          }
-          @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-          @keyframes zoom-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-          .animate-in { animation: fade-in 0.5s ease-out forwards; }
-          .zoom-in { animation: zoom-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-          * { -webkit-tap-highlight-color: transparent; }
-        `}</style>
+        {isProcessing && (
+           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center">
+             <div className="bg-white p-6 rounded-3xl flex flex-col items-center gap-3">
+               <Loader2 className="animate-spin text-blue-600" size={32} />
+               <span className="text-[9px] font-black uppercase text-slate-400">Optimisation...</span>
+             </div>
+           </div>
+        )}
+
       </div>
+
+      <style>{`
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes zoom-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .animate-in { animation: fade-in 0.4s ease-out forwards; }
+        .zoom-in { animation: zoom-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        * { -webkit-tap-highlight-color: transparent; }
+        @media print {
+          .no-print { display: none !important; }
+          .max-w-md { max-width: 100% !important; box-shadow: none !important; }
+          main { padding: 0 !important; }
+          .bg-slate-50 { background-color: transparent !important; }
+        }
+      `}</style>
     </div>
   );
 }
