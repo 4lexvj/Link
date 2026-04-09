@@ -29,7 +29,7 @@
             margin-right: 6px;
         }
         .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
-        .offline { background-color: #ef4444; }
+        .offline { background-color: #f59e0b; } /* Orange pour "Mode Local" */
         .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
 
         @keyframes pulse {
@@ -50,14 +50,17 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Amélioration défilement horizontal photos */
+        .photo-strip::-webkit-scrollbar { height: 4px; }
+        .photo-strip::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
     </style>
 </head>
 <body>
     <div id="root">
         <div class="h-screen flex flex-col items-center justify-center text-slate-400 font-medium text-center p-10">
             <div class="loader mb-4"></div>
-            Préparation de l'interface Immo-Alex...<br/>
-            <span class="text-xs mt-2 opacity-50 text-blue-500 font-bold">Initialisation du système</span>
+            Chargement Immo-Alex Pro...
         </div>
     </div>
 
@@ -86,16 +89,14 @@
                 window.FirebaseSDK = { 
                     auth, db, appId, doc, setDoc, collection, onSnapshot, 
                     signInAnonymously, onAuthStateChanged,
-                    isCloud: true
+                    isCloudEnabled: true
                 };
             } catch (e) {
-                console.warn("Firebase n'a pas pu être initialisé. Passage en mode local.");
-                window.FirebaseSDK = { isCloud: false };
+                window.FirebaseSDK = { isCloudEnabled: false };
             }
             window.dispatchEvent(new Event('firebase-ready'));
         };
 
-        // On démarre l'interface immédiatement
         initFirebase();
     </script>
 
@@ -116,11 +117,8 @@
             const start = (e) => {
                 const pos = getPos(e);
                 const ctx = canvasRef.current.getContext('2d');
-                ctx.lineWidth = 2;
-                ctx.lineCap = 'round';
-                ctx.strokeStyle = '#0f172a';
-                ctx.beginPath();
-                ctx.moveTo(pos.x, pos.y);
+                ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0f172a';
+                ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
                 setIsDrawing(true);
             };
 
@@ -128,8 +126,7 @@
                 if (!isDrawing) return;
                 const pos = getPos(e);
                 const ctx = canvasRef.current.getContext('2d');
-                ctx.lineTo(pos.x, pos.y);
-                ctx.stroke();
+                ctx.lineTo(pos.x, pos.y); ctx.stroke();
             };
 
             const stop = () => {
@@ -169,6 +166,8 @@
             const [user, setUser] = useState(null);
             const [syncStatus, setSyncStatus] = useState('idle');
             const [cloudMode, setCloudMode] = useState(false);
+            const fileInputRef = useRef(null);
+            const [activeElement, setActiveElement] = useState(null); // {roomId, elId}
             
             const [formData, setFormData] = useState({
                 address: "",
@@ -189,16 +188,12 @@
             }, []);
 
             useEffect(() => {
-                if (!fb || !fb.isCloud) {
-                    setCloudMode(false);
-                    return;
-                }
+                if (!fb || !fb.isCloudEnabled) return;
                 
                 const unsubAuth = fb.onAuthStateChanged(fb.auth, async (u) => {
                     if (u) {
                         setUser(u);
                         setCloudMode(true);
-                        // Chargement des données si elles existent
                         const docRef = fb.doc(fb.db, 'artifacts', fb.appId, 'users', u.uid, 'edl', 'current');
                         fb.onSnapshot(docRef, (docSnap) => {
                             if (docSnap.exists()) {
@@ -209,7 +204,7 @@
                         try {
                             await fb.signInAnonymously(fb.auth);
                         } catch (e) {
-                            console.warn("Échec Auth Anonyme. Activez 'Anonymous' dans Firebase. Passage en mode local.");
+                            console.warn("Auth non configurée.");
                             setCloudMode(false);
                         }
                     }
@@ -226,37 +221,76 @@
                         await fb.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
                         setSyncStatus('saved');
                         setTimeout(() => setSyncStatus('idle'), 2000);
-                    } catch (e) { 
-                        setSyncStatus('idle'); 
-                    }
+                    } catch (e) { setSyncStatus('idle'); }
                 }, 2000);
                 return () => clearTimeout(timer);
             }, [formData, user, fb, cloudMode]);
 
-            if (!fb && !cloudMode) {
-                // Si Firebase n'est pas encore là, on affiche un loader minimal
-                return (
-                    <div className="h-screen flex items-center justify-center text-slate-400">
-                         Chargement de l'application...
-                    </div>
-                );
-            }
+            // Gestion des photos
+            const triggerPhoto = (roomId, elId) => {
+                setActiveElement({ roomId, elId });
+                fileInputRef.current.click();
+            };
+
+            const handlePhoto = (e) => {
+                const file = e.target.files[0];
+                if (!file || !activeElement) return;
+
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64 = reader.result;
+                    setFormData(prev => ({
+                        ...prev,
+                        rooms: prev.rooms.map(r => r.id === activeElement.roomId ? {
+                            ...r,
+                            elements: r.elements.map(el => el.id === activeElement.elId ? {
+                                ...el,
+                                photos: [...(el.photos || []), base64]
+                            } : el)
+                        } : r)
+                    }));
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const shareReport = async () => {
+                if (navigator.share) {
+                    try {
+                        await navigator.share({
+                            title: 'État des Lieux Immo-Alex',
+                            text: `Rapport pour : ${formData.address || 'Sans adresse'}`,
+                            url: window.location.href
+                        });
+                    } catch (err) { console.log(err); }
+                } else {
+                    window.print();
+                }
+            };
+
+            if (!fb) return <div className="h-screen flex items-center justify-center">Initialisation...</div>;
 
             return (
-                <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col">
+                <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
+                    <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
+                    
                     <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
                         <div className="flex flex-col">
                             <span className="text-xl font-black italic tracking-tighter">IMMO-ALEX</span>
                             <div className="flex items-center mt-1">
-                                <span className={`status-pulse ${!cloudMode ? 'offline' : (syncStatus === 'syncing' ? 'syncing' : 'online')}`}></span>
+                                <span className={`status-pulse ${cloudMode ? (syncStatus === 'syncing' ? 'syncing' : 'online') : 'offline'}`}></span>
                                 <span className="text-[10px] font-bold uppercase text-slate-400">
-                                    {!cloudMode ? 'Mode Local (Auth Firebase requise)' : (syncStatus === 'syncing' ? 'Synchronisation...' : 'Cloud Actif')}
+                                    {cloudMode ? 'Cloud Actif' : 'Mode Local (Synchro Désactivée)'}
                                 </span>
                             </div>
                         </div>
-                        <button onClick={() => window.print()} className="p-3 bg-blue-600 rounded-full hover:bg-blue-500 shadow-lg active:scale-90">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                        </button>
+                        <div className="flex gap-2">
+                            <button onClick={shareReport} className="p-3 bg-slate-700 rounded-full hover:bg-slate-600 shadow-lg transition-all active:scale-90">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
+                            </button>
+                            <button onClick={() => window.print()} className="p-3 bg-blue-600 rounded-full hover:bg-blue-500 shadow-lg transition-all active:scale-90">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                            </button>
+                        </div>
                     </header>
 
                     <nav className="no-print flex border-b bg-white">
@@ -270,9 +304,9 @@
                     <main className="p-6 flex-1">
                         {step === 1 && (
                             <div className="space-y-6 animate-fadeIn">
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200">
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 shadow-inner">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Adresse du Bien</label>
-                                    <input type="text" className="w-full bg-transparent text-xl font-bold outline-none" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Adresse du logement" />
+                                    <input type="text" className="w-full bg-transparent text-xl font-bold outline-none" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Ex: 12 rue de la Paix..." />
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200">
@@ -291,25 +325,42 @@
                             <div className="space-y-8 animate-fadeIn">
                                 {formData.rooms.map(room => (
                                     <div key={room.id} className="room-section border-l-4 border-blue-500 bg-slate-50 pl-4 py-4 rounded-r-2xl mb-6 shadow-sm">
-                                        <input className="text-lg font-black uppercase mb-4 w-full outline-none bg-transparent text-blue-900" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                                        <div className="flex justify-between items-center mb-4">
+                                            <input className="text-lg font-black uppercase w-full outline-none bg-transparent text-blue-900" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                                            <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== room.id)})} className="no-print text-red-400 p-2"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                                        </div>
+                                        
                                         <div className="space-y-4">
                                             {room.elements.map(el => (
-                                                <div key={el.id} className="p-4 border rounded-xl bg-white shadow-sm">
-                                                    <div className="flex justify-between items-center mb-2 gap-3">
-                                                        <input className="font-bold outline-none flex-1" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                <div key={el.id} className="p-4 border rounded-xl bg-white shadow-sm transition-all">
+                                                    <div className="flex justify-between items-center mb-3 gap-3">
+                                                        <input className="font-bold outline-none flex-1 text-slate-700" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
                                                         <select className="text-[10px] font-black border rounded-lg p-2 bg-slate-50 text-blue-600 outline-none" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
                                                             <option>Neuf</option><option>Bon</option><option>Moyen</option><option>Mauvais</option>
                                                         </select>
                                                     </div>
-                                                    <textarea className="w-full text-xs italic text-slate-500 outline-none border-none bg-transparent" placeholder="Observations..." rows="2" value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+                                                    
+                                                    <div className="no-print flex gap-2 overflow-x-auto pb-2 photo-strip mb-2">
+                                                        <button onClick={() => triggerPhoto(room.id, el.id)} className="w-14 h-14 shrink-0 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:bg-blue-50 hover:text-blue-500 border-2 border-dashed border-slate-200">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                                        </button>
+                                                        {el.photos?.map((p, idx) => (
+                                                            <div key={idx} className="relative w-14 h-14 shrink-0 shadow-sm border rounded-lg overflow-hidden group">
+                                                                <img src={p} className="w-full h-full object-cover" />
+                                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, i) => i !== idx)} : e2)} : r)})} className="absolute top-0 right-0 bg-red-500 text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    <textarea className="w-full text-xs italic text-slate-500 outline-none border-none bg-transparent" placeholder="Observations (clés, rayures...)" rows="1" value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
                                                 </div>
                                             ))}
                                             <button onClick={() => {
                                                 setFormData({
                                                     ...formData,
-                                                    rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, { id: Date.now(), label: 'Élément', status: 'Bon', comment: '' }]} : r)
+                                                    rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...(r.elements || []), { id: Date.now(), label: 'Élément', status: 'Bon', comment: '', photos: [] }]} : r)
                                                 });
-                                            }} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-slate-300 text-[10px] font-black uppercase">+ Élément</button>
+                                            }} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-slate-300 text-[10px] font-black uppercase hover:border-blue-300 hover:text-blue-400 transition-all">+ Élément</button>
                                         </div>
                                     </div>
                                 ))}
@@ -323,20 +374,23 @@
                                     <SignaturePad label="Bailleur" savedImage={formData.signatures.owner} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
                                     <SignaturePad label="Locataire" savedImage={formData.signatures.tenant} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
                                 </div>
+                                <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-[10px] text-blue-700 font-bold leading-relaxed">
+                                    En signant ce document, les parties reconnaissent l'exactitude des informations saisies et l'état général du bien tel que décrit.
+                                </div>
                             </div>
                         )}
 
-                        {/* Rendu Impression PDF caché en UI */}
+                        {/* Rendu Impression PDF */}
                         <div className="hidden print:block font-serif text-slate-900">
                             <div className="border-b-4 border-slate-900 pb-4 mb-8 flex justify-between items-end">
                                 <div><h1 className="text-3xl font-black italic uppercase">État des Lieux</h1></div>
-                                <div className="text-right"><p className="font-bold">Le : {formData.date}</p></div>
+                                <div className="text-right"><p className="font-bold">Date : {formData.date}</p></div>
                             </div>
                             <div className="grid grid-cols-2 gap-6 mb-8">
-                                <div className="p-4 bg-slate-50 border rounded-xl"><h4 className="text-[10px] font-black uppercase text-slate-400">Bien immobilier</h4><p className="font-bold">{formData.address}</p></div>
+                                <div className="p-4 bg-slate-50 border rounded-xl"><h4 className="text-[10px] font-black uppercase text-slate-400">Bien immobilier</h4><p className="font-bold">{formData.address || 'Non spécifié'}</p></div>
                                 <div className="grid grid-cols-1 gap-2">
-                                    <div className="p-2 border rounded-lg text-xs"><b>Bailleur:</b> {formData.owner}</div>
-                                    <div className="p-2 border rounded-lg text-xs"><b>Locataire:</b> {formData.tenant}</div>
+                                    <div className="p-2 border rounded-lg text-xs"><b>Bailleur :</b> {formData.owner || 'N/A'}</div>
+                                    <div className="p-2 border rounded-lg text-xs"><b>Locataire :</b> {formData.tenant || 'N/A'}</div>
                                 </div>
                             </div>
                             {formData.rooms.map(room => (
@@ -352,7 +406,14 @@
                                             <tr key={el.id} className="break-inside-avoid">
                                                 <td className="border p-2 font-bold">{el.label}</td>
                                                 <td className="border p-2 text-center font-black uppercase">{el.status}</td>
-                                                <td className="border p-2 italic text-slate-600">{el.comment || "RAS"}</td>
+                                                <td className="border p-2 italic text-slate-600">
+                                                    {el.comment || "RAS"}
+                                                    <div className="mt-2 flex gap-1 flex-wrap">
+                                                        {el.photos?.map((p, i) => (
+                                                            <img key={i} src={p} className="h-10 w-10 object-cover border rounded" />
+                                                        ))}
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}</tbody>
                                     </table>
@@ -364,7 +425,7 @@
                     <footer className="no-print p-6 border-t bg-slate-50 flex gap-4 sticky bottom-0 z-40">
                         {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-4 bg-white border-2 border-slate-200 font-bold rounded-2xl text-slate-500 active:scale-95 transition-all">Retour</button>}
                         <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
-                            {step < 3 ? 'Suivant' : 'Générer le PDF'}
+                            {step < 3 ? 'Suivant' : 'Générer le Rapport'}
                         </button>
                     </footer>
                 </div>
