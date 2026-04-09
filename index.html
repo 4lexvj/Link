@@ -3,68 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Immo-Alex | État des Lieux Pro</title>
+    <title>Immo-Alex | Cloud & PDF</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
     <style>
-        /* Optimisation pour l'impression PDF */
         @media print {
             .no-print { display: none !important; }
             body { background: white !important; margin: 0; padding: 0; }
-            .max-w-2xl { max-width: 100% !important; width: 100% !important; border: none !important; box-shadow: none !important; }
-            main { padding: 0 !important; }
-            .page-break { page-break-after: always; }
-            .room-section { break-inside: avoid; border-left: 2px solid #2563eb !important; margin-bottom: 2rem; }
-            .signature-container { break-inside: avoid; margin-top: 3rem; }
-            /* Force l'affichage de tout le contenu même si on est à l'étape 3 sur l'écran */
             .print-all { display: block !important; }
-            .screen-only { display: none !important; }
+            .room-section { break-inside: avoid; border-left: 2px solid #000 !important; margin-bottom: 20px; padding-left: 15px; }
+            .signature-container { break-inside: avoid; margin-top: 30px; }
+            .max-w-3xl { max-width: 100% !important; width: 100% !important; shadow: none !important; }
         }
         
-        body { background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-        .signature-pad { border: 2px dashed #cbd5e1; background: #fff; cursor: crosshair; touch-action: none; }
-        .btn-status-active { background-color: #2563eb !important; color: white !important; border-color: #2563eb !important; }
+        body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+        .signature-pad { border: 2px dashed #cbd5e1; background: #fff; touch-action: none; cursor: crosshair; }
         
-        /* Animation fluide entre étapes */
-        .fade-in { animation: fadeIn 0.3s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .status-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
+        .offline { background-color: #ef4444; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-app';
+
+        // Exportation des fonctions vers l'objet global pour React
+        window.fb = { 
+            auth, db, appId, doc, setDoc, collection, onSnapshot, 
+            signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+        };
+    </script>
+
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- ICONES SVG ---
-        const IconPlus = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
-        const IconCamera = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>;
+        // --- ICONES ---
+        const IconShare = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>;
+        const IconCamera = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>;
         const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>;
-        const IconFile = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>;
 
         // --- COMPOSANT SIGNATURE ---
         const SignaturePad = ({ label, onSave, savedImage }) => {
             const canvasRef = useRef(null);
             const [isDrawing, setIsDrawing] = useState(false);
-            const [hasContent, setHasContent] = useState(!!savedImage);
-
-            useEffect(() => {
-                if (savedImage && canvasRef.current) {
-                    const ctx = canvasRef.current.getContext('2d');
-                    const img = new Image();
-                    img.onload = () => {
-                        ctx.clearRect(0, 0, 400, 160);
-                        ctx.drawImage(img, 0, 0);
-                    };
-                    img.src = savedImage;
-                }
-            }, [savedImage]);
 
             const getPos = (e) => {
-                const canvas = canvasRef.current;
-                const rect = canvas.getBoundingClientRect();
+                const rect = canvasRef.current.getBoundingClientRect();
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
                 return { x: clientX - rect.left, y: clientY - rect.top };
@@ -75,9 +79,6 @@
                 const ctx = canvasRef.current.getContext('2d');
                 ctx.beginPath();
                 ctx.moveTo(pos.x, pos.y);
-                ctx.lineWidth = 2;
-                ctx.lineCap = 'round';
-                ctx.strokeStyle = '#000';
                 setIsDrawing(true);
             };
 
@@ -87,330 +88,203 @@
                 const ctx = canvasRef.current.getContext('2d');
                 ctx.lineTo(pos.x, pos.y);
                 ctx.stroke();
-                setHasContent(true);
             };
 
             const stop = () => {
                 setIsDrawing(false);
-                if (hasContent) onSave(canvasRef.current.toDataURL());
-            };
-
-            const clear = () => {
-                const ctx = canvasRef.current.getContext('2d');
-                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-                setHasContent(false);
-                onSave(null);
+                onSave(canvasRef.current.toDataURL());
             };
 
             return (
-                <div className="mb-6 bg-white p-4 rounded-xl border border-slate-200 signature-container">
-                    <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wider">{label}</label>
+                <div className="mb-4 signature-container">
+                    <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest">{label}</label>
                     <div className="relative">
-                        {/* Pour l'impression, on affiche l'image si elle existe, sinon le canvas */}
                         <canvas 
-                            ref={canvasRef} width={400} height={160}
-                            className={`signature-pad w-full h-40 rounded-lg ${savedImage ? 'print:hidden' : ''}`}
+                            ref={canvasRef} width={400} height={150}
+                            className={`signature-pad w-full h-32 rounded-lg ${savedImage ? 'print:hidden' : ''}`}
                             onMouseDown={start} onMouseMove={move} onMouseUp={stop}
                             onTouchStart={start} onTouchMove={move} onTouchEnd={stop}
                         />
-                        {savedImage && (
-                            <img src={savedImage} className="hidden print:block w-full h-40 object-contain border rounded-lg" />
-                        )}
-                        {hasContent && (
-                            <button onClick={clear} className="no-print absolute top-2 right-2 bg-red-50 text-red-600 p-1 rounded-md text-xs font-bold">EFFACER</button>
-                        )}
+                        {savedImage && <img src={savedImage} className="hidden print:block w-full h-32 object-contain border rounded-lg" />}
                     </div>
                 </div>
             );
         };
 
-        // --- APPLICATION ---
         function App() {
             const [step, setStep] = useState(1);
-            const [formData, setFormData] = useState(() => {
-                const saved = localStorage.getItem('immo_alex_v3');
-                return saved ? JSON.parse(saved) : {
-                    address: "",
-                    date: new Date().toLocaleDateString('fr-FR'),
-                    owner: "",
-                    tenant: "",
-                    rooms: [
-                        { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'Bon', comment: '', photos: [] }] },
-                        { id: 2, name: 'Séjour', elements: [{ id: 201, label: 'Sols', status: 'Bon', comment: '', photos: [] }] }
-                    ],
-                    signatures: { owner: null, tenant: null }
-                };
+            const [isOnline, setIsOnline] = useState(navigator.onLine);
+            const [user, setUser] = useState(null);
+            const [syncStatus, setSyncStatus] = useState('idle');
+            
+            const [formData, setFormData] = useState({
+                address: "",
+                date: new Date().toLocaleDateString('fr-FR'),
+                owner: "",
+                tenant: "",
+                rooms: [
+                    { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'Bon', comment: '', photos: [] }] }
+                ],
+                signatures: { owner: null, tenant: null }
             });
 
+            // Connexion status
             useEffect(() => {
-                localStorage.setItem('immo_alex_v3', JSON.stringify(formData));
-            }, [formData]);
+                const handleStatus = () => setIsOnline(navigator.onLine);
+                window.addEventListener('online', handleStatus);
+                window.addEventListener('offline', handleStatus);
+                return () => {
+                    window.removeEventListener('online', handleStatus);
+                    window.removeEventListener('offline', handleStatus);
+                };
+            }, []);
 
-            const fileInputRef = useRef(null);
-            const [activeTarget, setActiveTarget] = useState(null);
+            // Firebase Auth (Correction des références)
+            useEffect(() => {
+                const initAuth = async () => {
+                    if (!window.fb) return;
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await window.fb.signInWithCustomToken(window.fb.auth, __initial_auth_token);
+                        } else {
+                            await window.fb.signInAnonymously(window.fb.auth);
+                        }
+                    } catch (e) { console.error("Auth error", e); }
+                };
+                initAuth();
+                const unsub = window.fb.onAuthStateChanged(window.fb.auth, setUser);
+                return () => unsub();
+            }, []);
+
+            // Sync Cloud
+            useEffect(() => {
+                if (!user || !isOnline || !window.fb) return;
+                const timer = setTimeout(async () => {
+                    setSyncStatus('syncing');
+                    try {
+                        const docRef = window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'users', user.uid, 'edl', 'current');
+                        await window.fb.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
+                        setSyncStatus('saved');
+                    } catch (e) { setSyncStatus('idle'); }
+                }, 2000);
+                return () => clearTimeout(timer);
+            }, [formData, user, isOnline]);
 
             const addRoom = () => {
-                const newRoom = { id: Date.now(), name: 'Nouvelle pièce', elements: [] };
-                setFormData({...formData, rooms: [...formData.rooms, newRoom]});
-            };
-
-            const deleteRoom = (id) => {
-                if(confirm("Supprimer cette pièce ?")) {
-                    setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== id)});
-                }
+                setFormData({...formData, rooms: [...formData.rooms, { id: Date.now(), name: 'Nouvelle pièce', elements: [] }]});
             };
 
             const addElement = (roomId) => {
                 setFormData({
                     ...formData,
                     rooms: formData.rooms.map(r => r.id === roomId ? {
-                        ...r, 
-                        elements: [...r.elements, { id: Date.now(), label: 'Nouvel élément', status: 'Bon', comment: '', photos: [] }]
+                        ...r, elements: [...r.elements, { id: Date.now(), label: 'Élément', status: 'Bon', comment: '', photos: [] }]
                     } : r)
                 });
             };
 
-            const handlePhoto = (e) => {
-                const file = e.target.files[0];
-                if (!file || !activeTarget) return;
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 800;
-                        let width = img.width;
-                        let height = img.height;
-                        if (width > MAX_WIDTH) {
-                            height *= MAX_WIDTH / width;
-                            width = MAX_WIDTH;
-                        }
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, width, height);
-                        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-
-                        setFormData({
-                            ...formData,
-                            rooms: formData.rooms.map(r => r.id === activeTarget.roomId ? {
-                                ...r,
-                                elements: r.elements.map(el => el.id === activeTarget.elId ? {
-                                    ...el, photos: [...el.photos, dataUrl]
-                                } : el)
-                            } : r)
+            const handleShare = async () => {
+                if (navigator.share) {
+                    try {
+                        await navigator.share({
+                            title: 'Immo-Alex | État des Lieux',
+                            text: `Rapport pour : ${formData.address}`,
+                            url: window.location.href
                         });
-                    };
-                    img.src = event.target.result;
-                };
-                reader.readAsDataURL(file);
-            };
-
-            const printPDF = () => {
-                window.print();
+                    } catch (e) { window.print(); }
+                } else {
+                    window.print();
+                }
             };
 
             return (
-                <div className="max-w-2xl mx-auto min-h-screen bg-white shadow-2xl flex flex-col">
-                    <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
-                    
-                    {/* Header */}
-                    <header className="bg-slate-900 text-white p-6 pt-10 no-print">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h1 className="text-2xl font-black tracking-tighter italic">IMMO-ALEX</h1>
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Expertise État des Lieux</p>
+                <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-xl flex flex-col">
+                    <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
+                        <div className="flex flex-col">
+                            <span className="text-xl font-black italic tracking-tighter">IMMO-ALEX</span>
+                            <div className="flex items-center mt-1">
+                                <span className={`status-pulse ${isOnline ? 'online' : 'offline'}`}></span>
+                                <span className="text-[10px] font-bold uppercase text-slate-400">
+                                    {isOnline ? (syncStatus === 'syncing' ? 'Sync...' : 'Cloud OK') : 'Hors ligne'}
+                                </span>
                             </div>
-                            <button onClick={printPDF} className="bg-blue-600 p-3 rounded-full shadow-lg active:scale-90 transition-transform flex items-center gap-2">
-                                <IconFile /> <span className="text-xs font-bold">PDF</span>
-                            </button>
                         </div>
+                        <button onClick={handleShare} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+                            <IconShare />
+                        </button>
                     </header>
 
-                    {/* Header Impression Uniquement */}
-                    <div className="hidden print:block border-b-4 border-slate-900 pb-4 mb-6">
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <h1 className="text-3xl font-black italic">IMMO-ALEX</h1>
-                                <p className="text-sm font-bold uppercase text-slate-500">Rapport d'État des Lieux</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-sm font-bold">Date: {formData.date}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Navigation Étapes */}
-                    <nav className="no-print flex border-b bg-white sticky top-0 z-10">
-                        {[1, 2, 3].map(num => (
-                            <button 
-                                key={num}
-                                onClick={() => setStep(num)}
-                                className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-colors ${step === num ? 'border-b-4 border-blue-600 text-blue-600' : 'text-slate-400'}`}
-                            >
-                                {num === 1 ? 'Infos' : num === 2 ? 'Pièces' : 'Validation'}
+                    <div className="no-print flex border-b bg-white">
+                        {[1, 2, 3].map(n => (
+                            <button key={n} onClick={() => setStep(n)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest ${step === n ? 'text-blue-600 border-b-4 border-blue-600' : 'text-slate-400'}`}>
+                                {n === 1 ? 'Propriété' : n === 2 ? 'Inventaire' : 'Signatures'}
                             </button>
                         ))}
-                    </nav>
+                    </div>
 
-                    {/* Contenu Principal */}
-                    <main className="flex-1 p-6">
-                        {/* SECTION 1: INFOS (Toujours visible à l'impression) */}
-                        <div className={`${step === 1 ? 'block' : 'hidden print:block'} space-y-6 mb-8`}>
-                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 print:bg-white print:border-none print:p-0">
-                                <label className="block text-xs font-black text-slate-500 mb-2 uppercase print:text-slate-900">Adresse du bien</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full bg-transparent text-xl font-bold text-slate-900 outline-none border-b-2 border-slate-200 focus:border-blue-500 pb-1 print:border-none"
-                                    placeholder="Ex: 12 Rue de la Paix..."
-                                    value={formData.address}
-                                    onChange={e => setFormData({...formData, address: e.target.value})}
-                                />
+                    <main className="p-6 flex-1">
+                        <div className="hidden print:block border-b-4 border-black pb-4 mb-6">
+                            <h1 className="text-3xl font-black italic uppercase">État des Lieux Contradictoire</h1>
+                            <p className="font-bold mt-2">Date : {formData.date}</p>
+                        </div>
+
+                        {/* SECTION INFOS */}
+                        <div className={`${step === 1 ? 'block' : 'hidden print:block'} space-y-6`}>
+                            <div className="p-4 bg-slate-50 rounded-xl border print:p-0 print:bg-transparent print:border-none">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Adresse du Bien</label>
+                                <input type="text" className="w-full bg-transparent text-xl font-bold outline-none border-b focus:border-blue-500" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Adresse..." />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 print:bg-white print:border-none print:p-0">
-                                    <label className="block text-xs font-black text-slate-500 mb-2 uppercase">Propriétaire</label>
-                                    <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} placeholder="Nom..." />
+                                <div className="p-4 bg-slate-50 rounded-xl border print:p-0 print:bg-transparent print:border-none">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Propriétaire</label>
+                                    <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} />
                                 </div>
-                                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 print:bg-white print:border-none print:p-0">
-                                    <label className="block text-xs font-black text-slate-500 mb-2 uppercase">Locataire</label>
-                                    <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} placeholder="Nom..." />
+                                <div className="p-4 bg-slate-50 rounded-xl border print:p-0 print:bg-transparent print:border-none">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Locataire</label>
+                                    <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} />
                                 </div>
                             </div>
                         </div>
 
-                        {/* SECTION 2: PIÈCES (Toujours visible à l'impression) */}
-                        <div className={`${step === 2 ? 'block' : 'hidden print:block'} space-y-8`}>
-                            <h2 className="hidden print:block text-xl font-black border-b-2 border-slate-900 mb-4 uppercase tracking-tighter">Inventaire des pièces</h2>
+                        {/* SECTION PIÈCES */}
+                        <div className={`${step === 2 ? 'block' : 'hidden print:block'} mt-8 space-y-8`}>
                             {formData.rooms.map(room => (
-                                <section key={room.id} className="room-section relative bg-white border-l-4 border-blue-600 pl-4 py-2 print:border-l-2">
-                                    <div className="flex justify-between items-center mb-4">
-                                        <input 
-                                            className="text-lg font-black text-slate-900 bg-transparent outline-none uppercase tracking-tight w-full"
-                                            value={room.name}
-                                            onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})}
-                                        />
-                                        <button onClick={() => deleteRoom(room.id)} className="no-print text-red-300 hover:text-red-500 ml-2 shrink-0"><IconTrash /></button>
-                                    </div>
-
+                                <div key={room.id} className="room-section">
+                                    <input className="text-xl font-black uppercase tracking-tight mb-4 w-full outline-none bg-transparent" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
                                     <div className="space-y-4">
                                         {room.elements.map(el => (
-                                            <div key={el.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 print:bg-white print:border-slate-200">
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <input 
-                                                        className="font-bold text-slate-700 bg-transparent outline-none flex-1 mr-2"
-                                                        value={el.label}
-                                                        onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})}
-                                                    />
-                                                    <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded uppercase">{el.status}</span>
+                                            <div key={el.id} className="p-4 border rounded-xl bg-white shadow-sm print:shadow-none">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <input className="font-bold outline-none flex-1" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                    <select className="text-[10px] font-bold border rounded p-1" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
+                                                        <option>Bon</option><option>Usage</option><option>Mauvais</option>
+                                                    </select>
                                                 </div>
-                                                
-                                                <div className="no-print flex gap-1 mb-3">
-                                                    {['Bon', 'Usage', 'Mauvais'].map(st => (
-                                                        <button 
-                                                            key={st}
-                                                            className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${el.status === st ? 'btn-status-active shadow-md' : 'bg-white text-slate-400 border-slate-200'}`}
-                                                            onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: st} : e2)} : r)})}
-                                                        >
-                                                            {st.toUpperCase()}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                <textarea 
-                                                    className="w-full p-2 text-sm bg-white border border-slate-100 rounded-lg outline-none italic text-slate-500 mb-2 print:border-none print:italic"
-                                                    placeholder="Commentaires..."
-                                                    value={el.comment}
-                                                    onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})}
-                                                />
-
-                                                {/* Photos */}
-                                                <div className="flex gap-2 flex-wrap pb-2">
-                                                    <button 
-                                                        onClick={() => { setActiveTarget({roomId: room.id, elId: el.id}); fileInputRef.current.click(); }}
-                                                        className="no-print w-16 h-16 shrink-0 bg-white border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300"
-                                                    >
-                                                        <IconCamera />
-                                                    </button>
-                                                    {el.photos.map((p, i) => (
-                                                        <div key={i} className="relative w-20 h-20 print:w-32 print:h-32 shrink-0 group">
-                                                            <img src={p} className="w-full h-full object-cover rounded-xl shadow-sm border border-slate-200" />
-                                                            <button 
-                                                                onClick={() => {
-                                                                    const newPhotos = el.photos.filter((_, idx) => idx !== i);
-                                                                    setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: newPhotos} : e2)} : r)});
-                                                                }}
-                                                                className="no-print absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 shadow-md"
-                                                            ><IconTrash /></button>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                                                <textarea className="w-full text-xs italic text-slate-500 outline-none border-none resize-none" placeholder="Commentaire..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
                                             </div>
                                         ))}
-                                        <button 
-                                            onClick={() => addElement(room.id)}
-                                            className="no-print w-full py-2 text-[10px] font-black text-blue-500 border border-dashed border-blue-200 rounded-lg uppercase tracking-widest hover:bg-blue-50"
-                                        >
-                                            + Ajouter un élément
-                                        </button>
+                                        <button onClick={() => addElement(room.id)} className="no-print w-full py-2 border-2 border-dashed rounded-lg text-slate-300 text-[10px] font-bold uppercase">+ Ajouter Élément</button>
                                     </div>
-                                </section>
+                                </div>
                             ))}
-                            <button 
-                                onClick={addRoom}
-                                className="no-print w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-tighter flex items-center justify-center gap-2 hover:bg-slate-200"
-                            >
-                                <IconPlus /> Ajouter une pièce
-                            </button>
+                            <button onClick={addRoom} className="no-print w-full py-4 bg-slate-100 rounded-xl text-slate-500 font-black uppercase text-xs hover:bg-slate-200 transition-colors">Ajouter une Pièce</button>
                         </div>
 
-                        {/* SECTION 3: SIGNATURES (Toujours visible à l'impression) */}
-                        <div className={`${step === 3 ? 'block' : 'hidden print:block'} space-y-6 mt-10 print:mt-12`}>
-                            <h2 className="hidden print:block text-xl font-black border-b-2 border-slate-900 mb-4 uppercase tracking-tighter">Signatures</h2>
-                            
-                            <div className="no-print mb-8 text-center">
-                                <h2 className="text-xl font-black text-slate-900 uppercase">Dernière étape</h2>
-                                <p className="text-slate-500 text-sm">Veuillez apposer les signatures pour figer le document.</p>
+                        {/* SECTION SIGNATURES */}
+                        <div className={`${step === 3 ? 'block' : 'hidden print:block'} mt-10`}>
+                            <h2 className="text-sm font-black text-blue-600 uppercase mb-6 tracking-widest">Signatures des Parties</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <SignaturePad label="Signature Bailleur" savedImage={formData.signatures.owner} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
+                                <SignaturePad label="Signature Locataire" savedImage={formData.signatures.tenant} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <SignaturePad 
-                                    label="Signature du Bailleur" 
-                                    savedImage={formData.signatures.owner} 
-                                    onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} 
-                                />
-                                <SignaturePad 
-                                    label="Signature du Locataire" 
-                                    savedImage={formData.signatures.tenant} 
-                                    onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} 
-                                />
-                            </div>
-
-                            <button 
-                                onClick={printPDF}
-                                className="no-print w-full py-5 bg-green-600 text-white rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-transform mt-4"
-                            >
-                                <IconFile /> GÉNÉRER LE PDF FINAL
-                            </button>
                         </div>
                     </main>
 
-                    {/* Footer Fixe de navigation */}
-                    <footer className="no-print p-6 border-t bg-slate-50 flex justify-between gap-4 sticky bottom-0 z-10">
-                        {step > 1 && (
-                            <button onClick={() => setStep(step - 1)} className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold shadow-sm">Retour</button>
-                        )}
-                        {step < 3 ? (
-                            <button onClick={() => setStep(step + 1)} className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Suivant</button>
-                        ) : (
-                            <div className="flex-1"></div>
-                        )}
-                    </footer>
-
-                    {/* Mentions légales Impression */}
-                    <footer className="hidden print:block p-10 text-[9px] text-slate-400 border-t mt-10 text-center italic">
-                        Ce document constitue l'état des lieux contradictoire conformément à la loi. Signé électroniquement le {formData.date}.
+                    <footer className="no-print p-6 border-t bg-slate-50 flex gap-4 sticky bottom-0 z-40">
+                        {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-3 bg-white border font-bold rounded-xl text-slate-500">Retour</button>}
+                        <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">
+                            {step < 3 ? 'Suivant' : 'Imprimer / PDF'}
+                        </button>
                     </footer>
                 </div>
             );
