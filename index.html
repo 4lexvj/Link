@@ -27,7 +27,6 @@ import {
   Cloud, 
   FileText, 
   CheckCircle2, 
-  AlertCircle, 
   Loader2, 
   Database, 
   Home, 
@@ -38,14 +37,14 @@ import {
   Search
 } from 'lucide-react';
 
-// --- CONFIGURATION FIREBASE ---
+// --- INITIALISATION FIREBASE ---
 const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alexs-v1';
 
-// --- COMPOSANT SIGNATURE ---
+// --- COMPOSANT DE SIGNATURE MANUSCRITE ---
 const SignatureBox = ({ label, onSave, savedImage }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -120,36 +119,35 @@ const SignatureBox = ({ label, onSave, savedImage }) => {
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-sm font-semibold text-slate-600 uppercase tracking-wider">{label}</label>
-      <div className="relative border-2 border-dashed border-slate-300 rounded-xl bg-white overflow-hidden aspect-[3/2] flex items-center justify-center">
+    <div className="flex flex-col gap-3">
+      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">{label}</label>
+      <div className="relative border-2 border-dashed border-slate-200 rounded-2xl bg-white overflow-hidden aspect-[4/3] flex items-center justify-center shadow-inner">
         {savedImage ? (
-          <img src={savedImage} alt="Signature" className="w-full h-full object-contain p-2" />
+          <img src={savedImage} alt="Signature" className="w-full h-full object-contain p-4" />
         ) : (
-          <canvas ref={canvasRef} width={600} height={400} className="w-full h-full cursor-crosshair touch-none" />
+          <canvas ref={canvasRef} width={800} height={600} className="w-full h-full cursor-crosshair touch-none bg-slate-50/30" />
         )}
       </div>
-      {!savedImage && (
+      {!savedImage ? (
         <div className="flex gap-2">
-          <button onClick={clearCanvas} className="flex-1 py-2 text-xs font-bold text-rose-500 uppercase flex items-center justify-center gap-1 bg-rose-50 rounded-lg">
-            <Eraser size={14} /> Réinitialiser
+          <button onClick={clearCanvas} className="flex-1 py-3 text-[10px] font-black text-rose-500 uppercase flex items-center justify-center gap-2 bg-rose-50 rounded-xl active:scale-95 transition-all">
+            <Eraser size={14} /> Effacer
           </button>
-          <button onClick={save} className="flex-1 py-2 text-xs font-bold text-emerald-600 uppercase flex items-center justify-center gap-1 bg-emerald-50 rounded-lg">
-            <CheckCircle2 size={14} /> Valider
+          <button onClick={save} className="flex-1 py-3 text-[10px] font-black text-emerald-600 uppercase flex items-center justify-center gap-2 bg-emerald-50 rounded-xl active:scale-95 transition-all">
+            <CheckCircle2 size={14} /> Valider la signature
           </button>
         </div>
-      )}
-      {savedImage && (
-        <button onClick={() => onSave(null)} className="text-rose-500 text-[10px] font-bold uppercase flex items-center gap-1">
-          <Trash2 size={12} /> Modifier la signature
+      ) : (
+        <button onClick={() => onSave(null)} className="text-rose-500 text-[10px] font-bold uppercase flex items-center gap-1 justify-center py-2">
+          <Trash2 size={12} /> Recommencer la signature
         </button>
       )}
     </div>
   );
 };
 
-// --- COMPOSANT PHOTO UPLOAD ---
-const PhotoUpload = ({ photos = [], onUpdate }) => {
+// --- COMPOSANT GESTION PHOTOS ---
+const PhotoGrid = ({ photos = [], onUpdate }) => {
   const fileInputRef = useRef(null);
 
   const handleFile = (e) => {
@@ -171,14 +169,13 @@ const PhotoUpload = ({ photos = [], onUpdate }) => {
 
   return (
     <div className="space-y-3">
-      <label className="text-sm font-semibold text-slate-600 uppercase">Photos de la pièce</label>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         {photos.map((p, i) => (
-          <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200">
+          <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-slate-100 shadow-sm">
             <img src={p} alt="" className="w-full h-full object-cover" />
             <button 
               onClick={() => removePhoto(i)}
-              className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-1 shadow-lg"
+              className="absolute top-1 right-1 bg-white/90 text-rose-500 rounded-lg p-1 shadow-sm"
             >
               <X size={12} />
             </button>
@@ -186,10 +183,10 @@ const PhotoUpload = ({ photos = [], onUpdate }) => {
         ))}
         <button 
           onClick={() => fileInputRef.current?.click()}
-          className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-lg text-slate-400 hover:bg-slate-50"
+          className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:bg-slate-50 transition-colors"
         >
-          <Camera size={24} />
-          <span className="text-[10px] uppercase font-bold mt-1">Ajouter</span>
+          <Camera size={20} />
+          <span className="text-[8px] uppercase font-black mt-1">Photo</span>
         </button>
       </div>
       <input type="file" ref={fileInputRef} onChange={handleFile} multiple accept="image/*" className="hidden" />
@@ -197,28 +194,26 @@ const PhotoUpload = ({ photos = [], onUpdate }) => {
   );
 };
 
-// --- APPLICATION PRINCIPALE ---
+// --- APP PRINCIPALE ---
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState('list'); // 'list' or 'editor'
+  const [view, setView] = useState('list');
   const [step, setStep] = useState(1);
   const [reports, setReports] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [status, setStatus] = useState({ auth: 'pending', firestore: 'pending' });
   const [searchTerm, setSearchTerm] = useState("");
 
   const [formData, setFormData] = useState({
     property: { address: '', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
     rooms: [
-      { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'B', photos: [] }] },
-      { id: 2, name: 'Cuisine', elements: [{ id: 201, label: 'Évier', status: 'B', photos: [] }] }
+      { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'B', photos: [] }] }
     ],
     signatures: { owner: null, tenant: null }
   });
 
-  // Initialisation Auth
+  // Auth & Firestore Setup
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -227,28 +222,20 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-        setStatus(prev => ({ ...prev, auth: 'success' }));
-      } catch (err) {
-        console.error(err);
-        setStatus(prev => ({ ...prev, auth: 'error' }));
-      }
+      } catch (err) { console.error(err); }
     };
     initAuth();
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // Sync Firestore
   useEffect(() => {
     if (!user) return;
     const reportsCol = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
     const unsubscribe = onSnapshot(reportsCol, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setReports(data);
+      setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
-      setStatus(prev => ({ ...prev, firestore: 'success' }));
     }, (err) => {
       console.error(err);
-      setStatus(prev => ({ ...prev, firestore: 'error' }));
       setLoading(false);
     });
     return () => unsubscribe();
@@ -258,18 +245,16 @@ export default function App() {
     if (!user) return;
     setIsSaving(true);
     try {
-      const reportsCol = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
       const payload = { ...data, updatedAt: serverTimestamp() };
-      
       if (currentId) {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', currentId), payload);
       } else {
-        const docRef = await addDoc(reportsCol, { ...payload, createdAt: serverTimestamp() });
+        const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reports'), { ...payload, createdAt: serverTimestamp() });
         setCurrentId(docRef.id);
       }
-      setTimeout(() => setIsSaving(false), 800);
+      setTimeout(() => setIsSaving(false), 600);
     } catch (e) {
-      console.error("Erreur sauvegarde", e);
+      console.error(e);
       setIsSaving(false);
     }
   };
@@ -277,43 +262,12 @@ export default function App() {
   const createNew = () => {
     setFormData({
       property: { address: '', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
-      rooms: [
-        { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'B', photos: [] }] }
-      ],
+      rooms: [{ id: Date.now(), name: 'Entrée', elements: [{ id: Date.now() + 1, label: 'Porte', status: 'B', photos: [] }] }],
       signatures: { owner: null, tenant: null }
     });
     setCurrentId(null);
     setStep(1);
     setView('editor');
-  };
-
-  const handleDelete = async (id, e) => {
-    e.stopPropagation();
-    if (!confirm("Supprimer ce dossier ?")) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', id));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleShare = async () => {
-    const url = `${window.location.origin}${window.location.pathname}?id=${currentId}`;
-    if (navigator.share) {
-      navigator.share({ title: "Immo-Alex's", text: formData.property.address, url });
-    } else {
-      copyToClipboard(url);
-    }
-  };
-
-  const copyToClipboard = (text) => {
-    const el = document.createElement('textarea');
-    el.value = text;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-    // Custom toast placeholder
   };
 
   const filteredReports = reports.filter(r => 
@@ -323,169 +277,127 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-        <Loader2 className="animate-spin text-indigo-600 mb-4" size={48} />
-        <h1 className="text-xl font-bold text-slate-800">Immo-Alex's Cloud</h1>
-        <p className="text-slate-500">Synchronisation des données...</p>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-12 text-center">
+        <Loader2 className="animate-spin text-slate-900 mb-4" size={40} />
+        <p className="font-bold text-slate-400 uppercase tracking-widest text-[10px]">Chargement des données...</p>
       </div>
     );
   }
 
   if (view === 'list') {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        <header className="bg-white border-b p-6 sticky top-0 z-10 shadow-sm">
-          <div className="max-w-4xl mx-auto flex justify-between items-end">
+      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+        <header className="bg-white border-b border-slate-100 p-8 pb-12 sticky top-0 z-10">
+          <div className="max-w-3xl mx-auto flex justify-between items-start">
             <div>
-              <h1 className="text-3xl font-black text-slate-900 tracking-tight">Immo-Alex's</h1>
-              <p className="text-slate-500 font-medium">Management Cloud</p>
+              <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-1">Immo-Alex's</h1>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px]">Cloud Management Online</p>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-emerald-500 bg-emerald-50 px-3 py-1 rounded-full">
-              <Database size={12} /> Connecté
-            </div>
+            <button onClick={createNew} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl shadow-slate-200 active:scale-95 transition-all">
+              <Plus size={24} />
+            </button>
           </div>
         </header>
 
-        <main className="flex-1 max-w-4xl w-full mx-auto p-6 space-y-6">
-          <div className="relative group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={20} />
+        <main className="flex-1 max-w-3xl w-full mx-auto p-6 -mt-8 space-y-6">
+          <div className="relative group shadow-sm">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
             <input 
               type="text" 
-              placeholder="Rechercher une adresse ou un locataire..."
-              className="w-full bg-white border-slate-200 border-2 rounded-2xl py-4 pl-12 pr-4 shadow-sm focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none"
+              placeholder="Rechercher une adresse..."
+              className="w-full bg-white border-none rounded-2xl py-5 pl-14 pr-6 font-bold text-slate-700 shadow-xl shadow-slate-200/50 outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="grid gap-4">
             {filteredReports.length === 0 ? (
-              <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-12 text-center">
-                <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
-                  <FileText size={40} />
-                </div>
-                <h3 className="text-lg font-bold text-slate-800">Aucun dossier trouvé</h3>
-                <p className="text-slate-500 mb-6">Commencez par créer votre premier état des lieux.</p>
-                <button onClick={createNew} className="inline-flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 active:scale-95 transition-all">
-                  <Plus size={20} /> Nouveau Dossier
-                </button>
-              </div>
+              <div className="text-center py-20 text-slate-300 uppercase font-black text-xs tracking-widest">Aucun dossier</div>
             ) : (
               filteredReports.map(r => (
                 <div 
                   key={r.id} 
                   onClick={() => { setFormData(r); setCurrentId(r.id); setView('editor'); setStep(1); }}
-                  className="group relative bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center gap-5 text-left active:scale-[0.98] transition-all hover:shadow-md cursor-pointer overflow-hidden"
+                  className="bg-white p-6 rounded-[2rem] shadow-sm flex items-center gap-5 hover:shadow-md cursor-pointer transition-all active:scale-[0.99]"
                 >
-                  <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                    <Home size={28} />
+                  <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+                    <Home size={24} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-slate-900 text-lg truncate">
-                      {r.property?.address || 'Adresse Inconnue'}
-                    </h4>
-                    <div className="flex items-center gap-3 text-sm text-slate-500 font-medium">
-                      <span className="flex items-center gap-1"><Calendar size={14} /> {r.property?.date}</span>
-                      <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
-                      <span className="truncate">{r.property?.tenant || 'Locataire non défini'}</span>
-                    </div>
+                    <h4 className="font-black text-slate-900 text-lg leading-tight truncate">{r.property?.address || 'Sans titre'}</h4>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-1 flex items-center gap-2">
+                      <Calendar size={12} /> {r.property?.date} • {r.property?.tenant || 'Locataire'}
+                    </p>
                   </div>
-                  <button 
-                    onClick={(e) => handleDelete(r.id, e)}
-                    className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
-                  >
-                    <Trash2 size={20} />
-                  </button>
+                  <ChevronRight className="text-slate-200" />
                 </div>
               ))
             )}
           </div>
         </main>
-        
-        {filteredReports.length > 0 && (
-          <div className="fixed bottom-8 right-8">
-            <button onClick={createNew} className="bg-indigo-600 text-white p-5 rounded-full shadow-2xl shadow-indigo-300 active:rotate-90 transition-all">
-              <Plus size={32} />
-            </button>
-          </div>
-        )}
       </div>
     );
   }
 
-  // --- MODE ÉDITEUR ---
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <header className="border-b p-4 flex items-center justify-between sticky top-0 bg-white/80 backdrop-blur-md z-20">
-        <button onClick={() => setView('list')} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-          <ChevronLeft size={24} />
-        </button>
+    <div className="min-h-screen bg-white flex flex-col font-sans">
+      <header className="p-6 border-b border-slate-50 flex items-center justify-between sticky top-0 bg-white/90 backdrop-blur-xl z-30">
+        <button onClick={() => setView('list')} className="p-3 bg-slate-50 rounded-xl text-slate-400"><ChevronLeft size={20} /></button>
         <div className="text-center">
-          <span className="text-[10px] font-black uppercase text-slate-400 block tracking-widest">Étape {step} / 3</span>
-          <h2 className="font-bold text-slate-800 leading-tight">
-            {step === 1 && "Informations"}
-            {step === 2 && "État des pièces"}
-            {step === 3 && "Finalisation"}
+          <p className="text-[9px] font-black uppercase text-slate-300 tracking-[0.2em] mb-0.5">Étape {step} sur 3</p>
+          <h2 className="font-black text-slate-900 text-sm uppercase tracking-wide">
+            {step === 1 ? "Informations" : step === 2 ? "Détails des pièces" : "Finalisation"}
           </h2>
         </div>
-        <div className="flex items-center gap-2">
-          {isSaving ? (
-             <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 px-2 py-1 bg-indigo-50 rounded-md">
-                <Loader2 size={12} className="animate-spin" /> SAUVEGARDE...
-             </div>
-          ) : (
-             <button onClick={() => saveToCloud()} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
-               <Cloud size={24} />
-             </button>
-          )}
+        <div className="w-12 flex justify-end">
+          {isSaving ? <Loader2 size={18} className="animate-spin text-slate-300" /> : <Cloud size={18} className="text-emerald-400" />}
         </div>
       </header>
 
-      <main className="flex-1 p-6 max-w-2xl mx-auto w-full pb-32">
+      <main className="flex-1 max-w-2xl mx-auto w-full p-6 pb-40">
         {step === 1 && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            <div className="space-y-4">
-              <h3 className="text-lg font-black flex items-center gap-2"><MapPin className="text-indigo-500" /> Bien immobilier</h3>
-              <div className="grid gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Adresse complète</label>
-                  <input 
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-medium focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                    placeholder="Ex: 12 rue de la Paix, Paris"
-                    value={formData.property.address}
-                    onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Propriétaire</label>
-                    <input 
-                      className="w-full bg-slate-50 border-none rounded-2xl p-4 font-medium focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                      value={formData.property.owner}
-                      onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Locataire</label>
-                    <input 
-                      className="w-full bg-slate-50 border-none rounded-2xl p-4 font-medium focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                      value={formData.property.tenant}
-                      onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})}
-                    />
-                  </div>
-                </div>
+          <div className="space-y-8 animate-in fade-in duration-500">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Adresse du bien</label>
+              <textarea 
+                className="w-full bg-slate-50 border-none rounded-2xl p-5 font-bold text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all outline-none"
+                rows="3"
+                value={formData.property.address}
+                onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Propriétaire</label>
+                <input 
+                  className="w-full bg-slate-50 border-none rounded-2xl p-5 font-bold text-slate-700"
+                  value={formData.property.owner}
+                  onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Locataire</label>
+                <input 
+                  className="w-full bg-slate-50 border-none rounded-2xl p-5 font-bold text-slate-700"
+                  value={formData.property.tenant}
+                  onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})}
+                />
               </div>
             </div>
           </div>
         )}
 
         {step === 2 && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+          <div className="space-y-10 animate-in fade-in duration-500">
             {formData.rooms.map((room, rIdx) => (
-              <div key={room.id} className="bg-slate-50 rounded-[2rem] p-6 space-y-4">
-                <div className="flex justify-between items-center">
+              <div key={room.id} className="bg-slate-50/50 rounded-[2.5rem] p-8 border border-slate-100">
+                <div className="flex justify-between items-center mb-6">
                   <input 
-                    className="bg-transparent font-black text-xl text-slate-900 border-none focus:ring-0 w-full"
+                    className="bg-transparent font-black text-2xl text-slate-900 border-none focus:ring-0 w-full"
                     value={room.name}
                     onChange={e => {
                       const newRooms = [...formData.rooms];
@@ -493,21 +405,15 @@ export default function App() {
                       setFormData({...formData, rooms: newRooms});
                     }}
                   />
-                  <button 
-                    onClick={() => {
-                      const newRooms = formData.rooms.filter((_, i) => i !== rIdx);
-                      setFormData({...formData, rooms: newRooms});
-                    }}
-                    className="text-rose-400"
-                  ><Trash2 size={20} /></button>
+                  <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter((_, i) => i !== rIdx)})} className="text-rose-300 p-2"><Trash2 size={20} /></button>
                 </div>
 
-                <div className="space-y-6">
+                <div className="space-y-8">
                   {room.elements.map((el, eIdx) => (
-                    <div key={el.id} className="bg-white p-5 rounded-2xl shadow-sm space-y-4">
+                    <div key={el.id} className="bg-white p-6 rounded-3xl shadow-sm space-y-5">
                       <div className="flex justify-between items-center gap-4">
                         <input 
-                          className="font-bold flex-1 text-slate-700 bg-slate-50 px-3 py-1 rounded-lg"
+                          className="font-bold text-slate-800 bg-slate-50 px-4 py-2 rounded-xl flex-1 outline-none"
                           value={el.label}
                           onChange={e => {
                             const newRooms = [...formData.rooms];
@@ -515,7 +421,7 @@ export default function App() {
                             setFormData({...formData, rooms: newRooms});
                           }}
                         />
-                        <div className="flex gap-1">
+                        <div className="flex bg-slate-50 p-1 rounded-xl">
                           {['B', 'U', 'M'].map(s => (
                             <button 
                               key={s}
@@ -524,15 +430,14 @@ export default function App() {
                                 newRooms[rIdx].elements[eIdx].status = s;
                                 setFormData({...formData, rooms: newRooms});
                               }}
-                              className={`w-10 h-10 rounded-xl font-black transition-all ${el.status === s ? 'bg-indigo-600 text-white scale-110 shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-400'}`}
+                              className={`w-9 h-9 rounded-lg font-black text-xs transition-all ${el.status === s ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-300'}`}
                             >
                               {s}
                             </button>
                           ))}
                         </div>
                       </div>
-
-                      <PhotoUpload 
+                      <PhotoGrid 
                         photos={el.photos} 
                         onUpdate={(photos) => {
                           const newRooms = [...formData.rooms];
@@ -545,10 +450,10 @@ export default function App() {
                   <button 
                     onClick={() => {
                       const newRooms = [...formData.rooms];
-                      newRooms[rIdx].elements.push({ id: Date.now(), label: 'Nouvel élément', status: 'B', photos: [] });
+                      newRooms[rIdx].elements.push({ id: Date.now(), label: 'Élément...', status: 'B', photos: [] });
                       setFormData({...formData, rooms: newRooms});
                     }}
-                    className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 font-bold text-xs uppercase hover:bg-white transition-all"
+                    className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-300 font-bold text-[10px] uppercase hover:bg-white"
                   >
                     + Ajouter un élément
                   </button>
@@ -556,78 +461,72 @@ export default function App() {
               </div>
             ))}
             <button 
-              onClick={() => {
-                setFormData({
-                  ...formData, 
-                  rooms: [...formData.rooms, { id: Date.now(), name: 'Nouvelle pièce', elements: [] }]
-                });
-              }}
-              className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black flex items-center justify-center gap-3 shadow-xl"
+              onClick={() => setFormData({...formData, rooms: [...formData.rooms, { id: Date.now(), name: 'Nouvelle pièce', elements: [] }]})}
+              className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-2xl active:scale-95 transition-all"
             >
-              <Plus /> AJOUTER UNE PIÈCE
+              Ajouter une pièce
             </button>
           </div>
         )}
 
         {step === 3 && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-            <div className="bg-slate-50 rounded-[2rem] p-8 space-y-8">
+          <div className="space-y-8 animate-in fade-in duration-500">
+            <div className="grid gap-8 bg-slate-50 rounded-[3rem] p-10 border border-slate-100 shadow-inner">
               <SignatureBox 
-                label="Signature du Propriétaire" 
+                label="Le Propriétaire" 
                 savedImage={formData.signatures.owner}
                 onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})}
               />
-              <div className="h-px bg-slate-200"></div>
+              <div className="h-px bg-slate-200 w-1/2 mx-auto"></div>
               <SignatureBox 
-                label="Signature du Locataire" 
+                label="Le Locataire" 
                 savedImage={formData.signatures.tenant}
                 onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})}
               />
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <button className="flex items-center justify-center gap-2 bg-slate-100 p-5 rounded-2xl font-bold text-slate-600">
-                <Printer size={20} /> PDF
-              </button>
-              <button onClick={handleShare} className="flex items-center justify-center gap-2 bg-slate-100 p-5 rounded-2xl font-bold text-slate-600">
-                <Share2 size={20} /> Partager
-              </button>
-            </div>
             
+            <div className="flex gap-4">
+               <button className="flex-1 bg-slate-100 p-5 rounded-2xl font-black text-[10px] uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2">
+                 <Printer size={18} /> Imprimer
+               </button>
+               <button className="flex-1 bg-slate-100 p-5 rounded-2xl font-black text-[10px] uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2">
+                 <Share2 size={18} /> Partager
+               </button>
+            </div>
+
             <button 
-              onClick={() => { saveToCloud(); setView('list'); }}
-              className="w-full bg-emerald-500 text-white p-6 rounded-[2rem] font-black text-xl shadow-xl shadow-emerald-100 flex items-center justify-center gap-3"
+              onClick={async () => { await saveToCloud(); setView('list'); }}
+              className="w-full bg-emerald-500 text-white p-7 rounded-[2rem] font-black text-lg shadow-2xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-3"
             >
-              <CheckCircle2 size={24} /> TERMINER & FERMER
+              <CheckCircle2 size={24} /> Terminer le dossier
             </button>
           </div>
         )}
       </main>
 
-      <footer className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t p-6 pb-8 flex items-center justify-between z-20">
+      <footer className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-50 p-6 pb-10 flex items-center justify-between z-40">
         <button 
           onClick={() => setStep(s => Math.max(1, s - 1))}
-          disabled={step === 1}
-          className={`flex items-center gap-2 font-black uppercase text-xs tracking-widest ${step === 1 ? 'opacity-20' : 'text-slate-400'}`}
+          className={`flex items-center gap-2 font-black uppercase text-[10px] tracking-widest ${step === 1 ? 'opacity-0 pointer-events-none' : 'text-slate-400'}`}
         >
-          <ChevronLeft size={20} /> Précédent
+          <ChevronLeft size={18} /> Retour
         </button>
         
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           {[1,2,3].map(i => (
-            <div key={i} className={`h-1.5 rounded-full transition-all ${step === i ? 'w-8 bg-indigo-600' : 'w-1.5 bg-slate-200'}`} />
+            <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${step === i ? 'w-8 bg-slate-900' : 'w-1.5 bg-slate-200'}`} />
           ))}
         </div>
 
         {step < 3 ? (
           <button 
-            onClick={() => { saveToCloud(); setStep(s => Math.min(3, s + 1)); }}
-            className="flex items-center gap-2 font-black uppercase text-xs tracking-widest text-indigo-600"
+            onClick={async () => { await saveToCloud(); setStep(s => s + 1); }}
+            className="flex items-center gap-2 font-black uppercase text-[10px] tracking-widest text-slate-900"
           >
-            Suivant <ChevronRight size={20} />
+            Suivant <ChevronRight size={18} />
           </button>
         ) : (
-          <div className="w-20" /> 
+          <div className="w-16" />
         )}
       </footer>
     </div>
