@@ -29,9 +29,15 @@
             margin-right: 6px;
         }
         .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
-        .offline { background-color: #ef4444; }
+        .offline { background-color: #94a3b8; }
+        .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
 
-        /* Animation de chargement */
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
         .loader {
             border: 3px solid #f3f3f3;
             border-top: 3px solid #3498db;
@@ -54,41 +60,42 @@
         </div>
     </div>
 
-    <!-- Script de démarrage unifié -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Initialisation sécurisée
         const startApp = () => {
+            let config = {};
             try {
-                const config = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-                const app = initializeApp(config);
-                const auth = getAuth(app);
-                const db = getFirestore(app);
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-default';
+                // Tentative de récupération de la config injectée
+                config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+            } catch(e) { console.warn("Config Firebase manquante ou invalide."); }
 
-                // On expose les services pour le script Babel
-                window.FirebaseSDK = { 
-                    auth, db, appId, doc, setDoc, collection, onSnapshot, 
-                    signInAnonymously, onAuthStateChanged, signInWithCustomToken 
-                };
-                
-                // On prévient React que Firebase est prêt
-                window.dispatchEvent(new Event('firebase-ready'));
-            } catch (e) {
-                console.error("Erreur d'initialisation :", e);
-                document.getElementById('root').innerHTML = `
-                    <div class="p-8 text-center">
-                        <h1 class="text-red-500 font-bold">Erreur de configuration</h1>
-                        <p class="text-sm text-slate-500 mt-2">${e.message}</p>
-                    </div>
-                `;
+            // Mode Cloud activé seulement si apiKey est présent
+            if (config && config.apiKey && config.apiKey !== "") {
+                try {
+                    const app = initializeApp(config);
+                    const auth = getAuth(app);
+                    const db = getFirestore(app);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-default';
+
+                    window.FirebaseSDK = { 
+                        auth, db, appId, doc, setDoc, collection, onSnapshot, 
+                        signInAnonymously, onAuthStateChanged, signInWithCustomToken,
+                        isCloud: true
+                    };
+                } catch (e) {
+                    console.error("Erreur init Firebase:", e);
+                    window.FirebaseSDK = { isCloud: false };
+                }
+            } else {
+                window.FirebaseSDK = { isCloud: false };
             }
+            
+            window.dispatchEvent(new Event('firebase-ready'));
         };
 
-        // On attend que le DOM soit prêt
         if (document.readyState === 'complete') {
             startApp();
         } else {
@@ -99,10 +106,6 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- ICONES ---
-        const IconShare = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>;
-
-        // --- COMPOSANT SIGNATURE ---
         const SignaturePad = ({ label, onSave, savedImage }) => {
             const canvasRef = useRef(null);
             const [isDrawing, setIsDrawing] = useState(false);
@@ -157,9 +160,8 @@
         function App() {
             const [fb, setFb] = useState(window.FirebaseSDK);
             const [step, setStep] = useState(1);
-            const [isOnline, setIsOnline] = useState(navigator.onLine);
             const [user, setUser] = useState(null);
-            const [syncStatus, setSyncStatus] = useState('idle');
+            const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, saved
             
             const [formData, setFormData] = useState({
                 address: "",
@@ -172,16 +174,16 @@
                 signatures: { owner: null, tenant: null }
             });
 
-            // Écouter l'initialisation Firebase
+            // Re-capture de l'objet SDK si l'événement arrive après le rendu
             useEffect(() => {
                 const checkFb = () => { if(window.FirebaseSDK) setFb(window.FirebaseSDK); };
                 window.addEventListener('firebase-ready', checkFb);
                 return () => window.removeEventListener('firebase-ready', checkFb);
             }, []);
 
-            // Authentification
+            // Authentification automatique
             useEffect(() => {
-                if (!fb) return;
+                if (!fb || !fb.isCloud) return;
                 
                 const initAuth = async () => {
                     try {
@@ -190,7 +192,7 @@
                         } else {
                             await fb.signInAnonymously(fb.auth);
                         }
-                    } catch (e) { console.error("Auth error", e); }
+                    } catch (e) { console.error("Erreur Auth:", e); }
                 };
                 
                 initAuth();
@@ -198,30 +200,32 @@
                 return () => unsub();
             }, [fb]);
 
-            // Synchronisation
+            // Sauvegarde automatique avec Debounce (2s après le dernier changement)
             useEffect(() => {
-                if (!fb || !user || !isOnline) return;
+                if (!fb || !fb.isCloud || !user) return;
+                
                 const timer = setTimeout(async () => {
                     setSyncStatus('syncing');
                     try {
+                        const path = `artifacts/${fb.appId}/users/${user.uid}/edl/current`;
                         const docRef = fb.doc(fb.db, 'artifacts', fb.appId, 'users', user.uid, 'edl', 'current');
-                        await fb.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
+                        await fb.setDoc(docRef, { 
+                            ...formData, 
+                            lastUpdated: new Date().toISOString() 
+                        }, { merge: true });
                         setSyncStatus('saved');
+                        // On repasse en idle après 3s pour nettoyer l'affichage
+                        setTimeout(() => setSyncStatus('idle'), 3000);
                     } catch (e) { 
+                        console.error("Erreur de sauvegarde:", e);
                         setSyncStatus('idle'); 
                     }
                 }, 2000);
-                return () => clearTimeout(timer);
-            }, [formData, user, isOnline, fb]);
 
-            if (!fb) {
-                return (
-                    <div className="h-screen flex flex-col items-center justify-center text-slate-400 font-medium">
-                        <div className="loader mb-4"></div>
-                        Connexion aux services de données...
-                    </div>
-                );
-            }
+                return () => clearTimeout(timer);
+            }, [formData, user, fb]);
+
+            if (!fb) return <div className="p-20 text-center text-slate-400">Initialisation...</div>;
 
             const addRoom = () => {
                 setFormData({...formData, rooms: [...formData.rooms, { id: Date.now(), name: 'Nouvelle pièce', elements: [] }]});
@@ -242,14 +246,14 @@
                         <div className="flex flex-col">
                             <span className="text-xl font-black italic tracking-tighter">IMMO-ALEX</span>
                             <div className="flex items-center mt-1">
-                                <span className={`status-pulse ${isOnline ? 'online' : 'offline'}`}></span>
+                                <span className={`status-pulse ${!fb.isCloud ? 'offline' : (syncStatus === 'syncing' ? 'syncing' : 'online')}`}></span>
                                 <span className="text-[10px] font-bold uppercase text-slate-400">
-                                    {isOnline ? (syncStatus === 'syncing' ? 'Sync...' : 'Cloud OK') : 'Hors ligne'}
+                                    {!fb.isCloud ? 'Mode Local' : (syncStatus === 'syncing' ? 'Sauvegarde...' : (syncStatus === 'saved' ? 'Enregistré' : 'Connecté'))}
                                 </span>
                             </div>
                         </div>
                         <button onClick={() => window.print()} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
-                            <IconShare />
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
                         </button>
                     </header>
 
@@ -262,11 +266,7 @@
                     </nav>
 
                     <main className="p-6 flex-1">
-                        <div className="hidden print:block border-b-4 border-black pb-4 mb-6">
-                            <h1 className="text-3xl font-black italic uppercase">État des Lieux Contradictoire</h1>
-                            <p className="font-bold mt-2">Date : {formData.date}</p>
-                        </div>
-
+                        {/* Vue Écran classique */}
                         {step === 1 && (
                             <div className="space-y-6">
                                 <div className="p-4 bg-slate-50 rounded-xl border">
@@ -321,25 +321,50 @@
                             </div>
                         )}
 
-                        {/* Vue Impression */}
-                        <div className="hidden print:block space-y-6">
-                            <div className="p-4 border">
-                                <p><strong>Adresse :</strong> {formData.address}</p>
-                                <p><strong>Bailleur :</strong> {formData.owner}</p>
-                                <p><strong>Locataire :</strong> {formData.tenant}</p>
+                        {/* Vue Impression PDF forcée */}
+                        <div className="hidden print:block">
+                            <div className="border-b-4 border-black pb-4 mb-6">
+                                <h1 className="text-3xl font-black italic uppercase">État des Lieux Contradictoire</h1>
+                                <p className="font-bold mt-2">Date : {formData.date}</p>
+                            </div>
+                            <div className="p-4 border mb-6 space-y-1">
+                                <p><strong>Adresse :</strong> {formData.address || "Non spécifiée"}</p>
+                                <p><strong>Bailleur :</strong> {formData.owner || "Non spécifié"}</p>
+                                <p><strong>Locataire :</strong> {formData.tenant || "Non spécifié"}</p>
                             </div>
                             {formData.rooms.map(room => (
-                                <div key={room.id} className="room-section">
-                                    <h3 className="text-lg font-bold border-b mb-2">{room.name}</h3>
-                                    {room.elements.map(el => (
-                                        <div key={el.id} className="grid grid-cols-3 gap-2 border-b py-1 text-sm">
-                                            <span>{el.label}</span>
-                                            <span className="italic">{el.status}</span>
-                                            <span>{el.comment}</span>
-                                        </div>
-                                    ))}
+                                <div key={room.id} className="room-section mb-6">
+                                    <h3 className="text-lg font-bold border-b-2 border-slate-200 mb-3 uppercase">{room.name}</h3>
+                                    <table className="w-full text-left text-sm border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-50">
+                                                <th className="border p-2">Élément</th>
+                                                <th className="border p-2">État</th>
+                                                <th className="border p-2">Observations</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {room.elements.map(el => (
+                                                <tr key={el.id}>
+                                                    <td className="border p-2 font-medium">{el.label}</td>
+                                                    <td className="border p-2 italic">{el.status}</td>
+                                                    <td className="border p-2 text-slate-600">{el.comment || "-"}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             ))}
+                            <div className="grid grid-cols-2 gap-10 mt-10">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase mb-2">Signature Bailleur</p>
+                                    {formData.signatures.owner ? <img src={formData.signatures.owner} className="w-full h-32 object-contain border rounded" /> : <div className="h-32 border rounded italic text-slate-300 flex items-center justify-center">Non signée</div>}
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase mb-2">Signature Locataire</p>
+                                    {formData.signatures.tenant ? <img src={formData.signatures.tenant} className="w-full h-32 object-contain border rounded" /> : <div className="h-32 border rounded italic text-slate-300 flex items-center justify-center">Non signée</div>}
+                                </div>
+                            </div>
                         </div>
                     </main>
 
@@ -347,8 +372,8 @@
                         {step > 1 && (
                             <button onClick={() => setStep(step-1)} className="px-6 py-3 bg-white border font-bold rounded-xl text-slate-500">Précédent</button>
                         )}
-                        <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest shadow-lg">
-                            {step < 3 ? 'Suivant' : 'Finaliser & PDF'}
+                        <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">
+                            {step < 3 ? 'Suivant' : 'Générer le PDF'}
                         </button>
                     </footer>
                 </div>
