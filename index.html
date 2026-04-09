@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { 
   getAuth, 
   signInWithCustomToken, 
@@ -16,15 +16,22 @@ import {
   Plus, Trash2, Camera, ChevronRight, 
   ChevronLeft, Loader2, X, Info, ClipboardList, 
   PenTool, Share2, RotateCcw, FileText, CheckCircle2,
-  ThumbsUp, CloudOff
+  ThumbsUp, CloudOff, WifiOff
 } from 'lucide-react';
 
 // --- CONFIGURATION FIREBASE ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-final';
+// Note: En mode aperçu, si la config est vide ou invalide, on passe en mode LocalStorage
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-local';
+
+let db = null;
+let auth = null;
+
+if (firebaseConfig) {
+  const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+  auth = getAuth(app);
+  db = getFirestore(app);
+}
 
 // --- UTILITAIRES ---
 const resizeImage = (file) => {
@@ -58,35 +65,58 @@ const SignaturePad = ({ label, onSave, savedImage }) => {
     if (savedImage || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a'; 
+    ctx.lineWidth = 3; 
+    ctx.lineCap = 'round';
     
     const getPos = (e) => {
       const rect = canvas.getBoundingClientRect();
       const t = e.touches ? e.touches[0] : e;
       return { x: t.clientX - rect.left, y: t.clientY - rect.top };
     };
-    const start = (e) => { setIsDrawing(true); setHasContent(true); const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
-    const move = (e) => { if (!isDrawing) return; e.preventDefault(); const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+
+    const start = (e) => { 
+      setIsDrawing(true); 
+      setHasContent(true); 
+      const p = getPos(e); 
+      ctx.beginPath(); 
+      ctx.moveTo(p.x, p.y); 
+    };
+
+    const move = (e) => { 
+      if (!isDrawing) return; 
+      e.preventDefault(); 
+      const p = getPos(e); 
+      ctx.lineTo(p.x, p.y); 
+      ctx.stroke(); 
+    };
+
     const stop = () => setIsDrawing(false);
 
-    canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
     window.addEventListener('mouseup', stop);
     canvas.addEventListener('touchstart', start, {passive: false});
     canvas.addEventListener('touchmove', move, {passive: false});
     canvas.addEventListener('touchend', stop);
+
     return () => {
-      canvas.removeEventListener('mousedown', start); canvas.removeEventListener('mousemove', move);
+      canvas.removeEventListener('mousedown', start);
+      canvas.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', stop);
-      canvas.removeEventListener('touchstart', start); canvas.removeEventListener('touchmove', move);
+      canvas.removeEventListener('touchstart', start);
+      canvas.removeEventListener('touchmove', move);
       canvas.removeEventListener('touchend', stop);
     };
   }, [isDrawing, savedImage]);
 
   if (savedImage) return (
-    <div className="bg-emerald-50 p-4 rounded-3xl border-2 border-emerald-100 relative mb-6">
+    <div className="bg-emerald-50 p-4 rounded-3xl border-2 border-emerald-100 relative mb-6 animate-in zoom-in">
       <p className="text-[10px] font-black text-emerald-600 uppercase mb-2 tracking-widest">{label} - SIGNÉ</p>
       <img src={savedImage} className="h-32 w-full object-contain" alt="Signature" />
-      <button onClick={() => onSave(null)} className="absolute top-2 right-2 p-2 bg-white rounded-full shadow-sm text-slate-400"><RotateCcw size={14} /></button>
+      <button onClick={() => onSave(null)} className="absolute top-2 right-2 p-2 bg-white rounded-full shadow-sm text-slate-400">
+        <RotateCcw size={14} />
+      </button>
     </div>
   );
 
@@ -95,10 +125,11 @@ const SignaturePad = ({ label, onSave, savedImage }) => {
       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-2">{label}</p>
       <div className="bg-white border-2 border-slate-200 rounded-3xl overflow-hidden shadow-inner h-48 relative">
         <canvas ref={canvasRef} width={400} height={200} className="w-full h-full touch-none cursor-crosshair" />
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5 font-black uppercase italic text-4xl">Signez ici</div>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => { canvasRef.current.getContext('2d').clearRect(0,0,400,200); setHasContent(false); }} className="px-4 text-[10px] font-bold text-slate-400 uppercase">Effacer</button>
-        <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-widest ${hasContent ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-300'}`}>Valider Signature</button>
+        <button onClick={() => { canvasRef.current.getContext('2d').clearRect(0,0,400,200); setHasContent(false); }} className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Effacer</button>
+        <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL())} className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${hasContent ? 'bg-slate-900 text-white shadow-lg active:scale-95' : 'bg-slate-100 text-slate-300'}`}>Valider Signature</button>
       </div>
     </div>
   );
@@ -108,22 +139,35 @@ const SignaturePad = ({ label, onSave, savedImage }) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [step, setStep] = useState(1);
-  const [syncStatus, setSyncStatus] = useState('pending');
+  const [syncStatus, setSyncStatus] = useState('local'); // 'local', 'saving', 'synced', 'error'
   const fileInputRef = useRef(null);
   const [activeTarget, setActiveTarget] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showShareSuccess, setShowShareSuccess] = useState(false);
   
-  const [formData, setFormData] = useState({
-    property: { address: '', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
-    rooms: [
-      { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'Bon', comment: '', photos: [] }] }
-    ],
-    signatures: { owner: null, tenant: null }
+  const [formData, setFormData] = useState(() => {
+    const saved = localStorage.getItem(`edl_data_${appId}`);
+    return saved ? JSON.parse(saved) : {
+      property: { address: '', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
+      rooms: [
+        { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'Bon', comment: '', photos: [] }] }
+      ],
+      signatures: { owner: null, tenant: null }
+    };
   });
 
-  // Auth
+  // Sauvegarde locale systématique
   useEffect(() => {
+    localStorage.setItem(`edl_data_${appId}`, JSON.stringify(formData));
+  }, [formData]);
+
+  // Auth & Cloud Sync Logic
+  useEffect(() => {
+    if (!auth || !db) {
+      setSyncStatus('local');
+      return;
+    }
+
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -131,35 +175,42 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (err) { setSyncStatus('error'); }
+      } catch (err) { 
+        setSyncStatus('local'); 
+      }
     };
     initAuth();
-    return onAuthStateChanged(auth, setUser);
+    
+    const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) {
+        // Tentative de récupération Cloud si connecté
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inspections', 'current_edl');
+        onSnapshot(docRef, (snap) => {
+          if (snap.exists()) {
+            const cloudData = snap.data();
+            // On ne fusionne que si les données locales sont vides ou si on veut forcer
+            setSyncStatus('synced');
+          }
+        }, () => setSyncStatus('local'));
+      }
+    });
+
+    return () => unsubscribeAuth();
   }, []);
 
-  // Sync Cloud
+  // Cloud Auto-Save
   useEffect(() => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inspections', 'current_edl');
-    return onSnapshot(docRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (JSON.stringify(data) !== JSON.stringify(formData)) setFormData(data);
-        setSyncStatus('synced');
-      }
-    }, () => setSyncStatus('error'));
-  }, [user]);
-
-  // Auto-Save
-  useEffect(() => {
-    if (!user || syncStatus === 'pending') return;
+    if (!user || !db || syncStatus === 'local') return;
     const timer = setTimeout(async () => {
       setSyncStatus('saving');
       try {
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inspections', 'current_edl');
         await setDoc(docRef, formData, { merge: true });
         setSyncStatus('synced');
-      } catch (err) { setSyncStatus('error'); }
+      } catch (err) { 
+        setSyncStatus('local'); 
+      }
     }, 2000);
     return () => clearTimeout(timer);
   }, [formData, user]);
@@ -190,13 +241,8 @@ export default function App() {
       text: `Rapport pour : ${formData.property.address || 'Adresse non spécifiée'}`,
       url: window.location.href
     };
-
     if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch (err) {
-        copyToClipboard();
-      }
+      try { await navigator.share(shareData); } catch (err) { copyToClipboard(); }
     } else {
       copyToClipboard();
     }
@@ -213,23 +259,13 @@ export default function App() {
     setTimeout(() => setShowShareSuccess(false), 3000);
   };
 
-  if (!user && syncStatus === 'pending') {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
-        <Loader2 className="animate-spin text-blue-600 mb-4" size={40} />
-        <h2 className="text-slate-800 font-bold mb-1 uppercase tracking-tighter">Immo-Alex Pro</h2>
-        <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest">Initialisation Cloud...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center font-sans pb-24">
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center font-sans pb-32">
       <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
       
-      {/* Toast Succès Copie */}
+      {/* Notifications & Loaders */}
       {showShareSuccess && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in slide-in-from-top-4 duration-300">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in zoom-in duration-300">
           <CheckCircle2 size={18} className="text-green-400" />
           <span className="text-[10px] font-black uppercase tracking-widest">Lien copié !</span>
         </div>
@@ -237,131 +273,161 @@ export default function App() {
 
       {isProcessing && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center">
-            <div className="bg-white p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-3">
-                <Loader2 className="animate-spin text-blue-600" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Compression Photo...</span>
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-4">
+                <Loader2 className="animate-spin text-blue-600" size={32} />
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 tracking-tighter">Optimisation Image...</span>
             </div>
         </div>
       )}
 
-      <div className="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative">
+      <div className="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
         
+        {/* Header Amélioré */}
         <header className="bg-slate-900 p-6 text-white sticky top-0 z-50 flex justify-between items-center shadow-lg">
-          <h1 className="text-xl font-black italic tracking-tighter flex items-center gap-2">
-            <ClipboardList size={22} className="text-blue-400" /> IMMO-ALEX
-          </h1>
-          <div className="flex items-center gap-3">
-            <button onClick={handleShare} className="p-2 bg-slate-800 rounded-xl text-blue-400 border border-slate-700 active:scale-90 transition-transform">
-              <Share2 size={20} />
+          <div>
+            <h1 className="text-xl font-black italic tracking-tighter flex items-center gap-2">
+              <ClipboardList size={22} className="text-blue-400" /> IMMO-ALEX
+            </h1>
+            <p className="text-[8px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-0.5">Expertise Immobilière</p>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <button onClick={handleShare} className="p-2.5 bg-slate-800 rounded-xl text-blue-400 border border-slate-700 active:scale-90 transition-transform">
+              <Share2 size={18} />
             </button>
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-colors duration-500 ${syncStatus === 'synced' ? 'bg-emerald-900/30 border-emerald-500' : 'bg-slate-800 border-slate-700'}`}>
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all duration-500 ${syncStatus === 'synced' ? 'bg-emerald-900/40 border-emerald-500/50' : 'bg-slate-800 border-slate-700'}`}>
               {syncStatus === 'synced' ? (
-                <ThumbsUp size={12} className="text-emerald-400 animate-in zoom-in duration-300" />
+                <ThumbsUp size={12} className="text-emerald-400 animate-bounce" />
               ) : syncStatus === 'saving' ? (
                 <Loader2 size={12} className="text-blue-400 animate-spin" />
               ) : (
-                <CloudOff size={12} className="text-slate-500" />
+                <WifiOff size={12} className="text-amber-500" />
               )}
-              <span className={`text-[8px] font-black uppercase tracking-tighter ${syncStatus === 'synced' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                {syncStatus === 'synced' ? 'OK' : syncStatus === 'saving' ? 'SYNC' : 'OFF'}
+              <span className={`text-[8px] font-black uppercase tracking-tighter ${syncStatus === 'synced' ? 'text-emerald-400' : 'text-amber-500'}`}>
+                {syncStatus === 'synced' ? 'CLOUD OK' : 'LOCAL'}
               </span>
             </div>
           </div>
         </header>
 
-        <nav className="flex border-b sticky top-[72px] bg-white/90 backdrop-blur-md z-40">
+        {/* Navigation Étapes */}
+        <nav className="flex border-b sticky top-[84px] bg-white/95 backdrop-blur-md z-40">
           {[
-            { s: 1, i: <Info size={18} />, l: 'Infos' },
-            { s: 2, i: <ClipboardList size={18} />, l: 'Pièces' },
-            { s: 3, i: <PenTool size={18} />, l: 'Signer' }
+            { s: 1, i: <Info size={16} />, l: 'Infos' },
+            { s: 2, i: <ClipboardList size={16} />, l: 'Pièces' },
+            { s: 3, i: <PenTool size={16} />, l: 'Signer' }
           ].map(btn => (
             <button key={btn.s} onClick={() => setStep(btn.s)} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-all ${step === btn.s ? 'text-blue-600 border-b-4 border-blue-600 bg-blue-50/50' : 'text-slate-300'}`}>
               {btn.i}
-              <span className="text-[9px] font-black uppercase tracking-widest">{btn.l}</span>
+              <span className="text-[8px] font-black uppercase tracking-widest">{btn.l}</span>
             </button>
           ))}
         </nav>
 
-        <main className="p-6 flex-1 overflow-y-auto">
+        {/* Contenu Principal */}
+        <main className="p-6 flex-1">
           {step === 1 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-200">
-                <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest">Adresse du bien</label>
-                <input className="w-full bg-transparent text-lg font-bold outline-none text-slate-800" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} placeholder="Ex: 12 Rue du Lac..." />
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-200 shadow-inner">
+                <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest pl-1">Adresse du bien</label>
+                <textarea 
+                  rows="2"
+                  className="w-full bg-transparent text-lg font-bold outline-none text-slate-800 resize-none" 
+                  value={formData.property.address} 
+                  onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} 
+                  placeholder="Ex: 12 Rue du Lac, Drumettaz..." 
+                />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-200">
-                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Propriétaire</label>
-                  <input className="w-full bg-transparent font-bold outline-none text-slate-800" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} />
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-tighter">Propriétaire / Bailleur</label>
+                  <input className="w-full bg-transparent font-bold outline-none text-slate-800" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} placeholder="Nom et Prénom" />
                 </div>
                 <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-200">
-                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Locataire</label>
-                  <input className="w-full bg-transparent font-bold outline-none text-slate-800" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} />
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-tighter">Locataire entrant</label>
+                  <input className="w-full bg-transparent font-bold outline-none text-slate-800" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} placeholder="Nom et Prénom" />
                 </div>
               </div>
             </div>
           )}
 
           {step === 2 && (
-            <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="space-y-6 animate-in fade-in duration-500 pb-10">
               {formData.rooms.map(room => (
-                <div key={room.id} className="bg-slate-50 p-4 rounded-[2.5rem] border border-slate-200">
+                <div key={room.id} className="bg-slate-50 p-4 rounded-[2.5rem] border border-slate-200 shadow-sm">
                   <div className="flex justify-between items-center mb-4 pl-2">
                     <input className="font-black text-blue-900 bg-transparent outline-none text-lg uppercase w-full" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
                     <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== room.id)})} className="text-red-300 p-2"><Trash2 size={18} /></button>
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {room.elements.map(el => (
-                      <div key={el.id} className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm space-y-3">
-                        <input className="w-full font-bold text-slate-700 outline-none text-sm" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                        <div className="flex gap-1">
+                      <div key={el.id} className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                        <div className="flex justify-between items-center">
+                            <input className="font-bold text-slate-700 outline-none text-sm w-full" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                            <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.filter(e2 => e2.id !== el.id)} : r)})} className="text-slate-200 ml-2"><X size={14} /></button>
+                        </div>
+                        <div className="flex gap-1.5">
                           {['Neuf', 'Bon', 'Moyen', 'Mauvais'].map(s => (
-                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2 rounded-xl text-[8px] font-black border transition-all ${el.status === s ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{s.toUpperCase()}</button>
+                            <button key={s} onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: s} : e2)} : r)})} className={`flex-1 py-2.5 rounded-xl text-[8px] font-black border transition-all ${el.status === s ? 'bg-slate-900 text-white border-slate-900 shadow-md scale-105' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{s.toUpperCase()}</button>
                           ))}
                         </div>
                         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                          <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-14 h-14 shrink-0 bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl flex items-center justify-center text-blue-600"><Camera size={20} /></button>
+                          <button onClick={() => { setActiveTarget({roomId: room.id, elementId: el.id}); fileInputRef.current.click(); }} className="w-16 h-16 shrink-0 bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl flex items-center justify-center text-blue-600 active:scale-90 transition-transform">
+                            <Camera size={22} />
+                          </button>
                           {el.photos?.map((p, idx) => (
-                            <div key={idx} className="relative w-14 h-14 shrink-0">
-                               <img src={p} className="w-full h-full object-cover rounded-2xl border border-slate-200" />
-                               <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, i) => i !== idx)} : e2)} : r)})} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={10} /></button>
+                            <div key={idx} className="relative w-16 h-16 shrink-0 animate-in zoom-in">
+                               <img src={p} className="w-full h-full object-cover rounded-2xl border border-slate-200" alt="Photo élément" />
+                               <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, i) => i !== idx)} : e2)} : r)})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg">
+                                 <X size={10} />
+                               </button>
                             </div>
                           ))}
                         </div>
                       </div>
                     ))}
-                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Élément...', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-3 text-[9px] font-black text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl uppercase tracking-widest">+ Élément</button>
+                    <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément...', status: 'Bon', photos: [], comment: ''}]} : r)})} className="w-full py-4 text-[10px] font-black text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl uppercase tracking-widest hover:bg-slate-100 transition-colors">+ Ajouter un élément</button>
                   </div>
                 </div>
               ))}
-              <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle Pièce', elements: []}]})} className="w-full py-4 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs shadow-xl flex items-center justify-center gap-2 transition-transform active:scale-95"><Plus size={16} /> Ajouter une Pièce</button>
+              <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle Pièce', elements: []}]})} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-xs shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-slate-200 border-4 border-slate-800"><Plus size={18} /> Nouvelle Pièce</button>
             </div>
           )}
 
           {step === 3 && (
-            <div className="space-y-6 animate-in fade-in duration-300 pb-20">
-              <h2 className="text-xl font-black text-slate-900 uppercase italic mb-4">Finalisation & Signatures</h2>
+            <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+              <div className="flex items-center gap-3 mb-6">
+                <PenTool size={24} className="text-blue-600" />
+                <h2 className="text-xl font-black text-slate-900 uppercase italic">Clôturer le rapport</h2>
+              </div>
+              
               <SignaturePad label="Bailleur / Mandataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} savedImage={formData.signatures.owner} />
               <SignaturePad label="Locataire" onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} savedImage={formData.signatures.tenant} />
               
-              <div className="pt-6 space-y-4">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Partage & Impression</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button onClick={() => window.print()} className="py-5 bg-blue-600 text-white rounded-[2rem] font-black flex items-center justify-center gap-2 uppercase tracking-widest text-[9px] shadow-xl"><FileText size={18} /> Imprimer</button>
-                    <button onClick={handleShare} className="py-5 bg-slate-900 text-white rounded-[2rem] font-black flex items-center justify-center gap-2 uppercase tracking-widest text-[9px] shadow-xl"><Share2 size={18} /> Partager</button>
+              <div className="pt-8 border-t border-slate-100 space-y-4">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Exportation Pro</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => window.print()} className="py-5 bg-blue-600 text-white rounded-[2rem] font-black flex flex-col items-center justify-center gap-1 uppercase tracking-widest text-[9px] shadow-xl active:scale-95 transition-transform">
+                      <FileText size={20} /> PDF / IMPRIMER
+                    </button>
+                    <button onClick={handleShare} className="py-5 bg-slate-900 text-white rounded-[2rem] font-black flex flex-col items-center justify-center gap-1 uppercase tracking-widest text-[9px] shadow-xl active:scale-95 transition-transform">
+                      <Share2 size={20} /> PARTAGER LIEN
+                    </button>
                   </div>
-                  <p className="text-[8px] text-center text-slate-400 font-bold uppercase tracking-widest px-4">En partageant, vous envoyez le lien direct vers cet état des lieux en ligne.</p>
               </div>
             </div>
           )}
         </main>
 
-        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex gap-4 z-40 max-w-md mx-auto no-print shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+        {/* Barre de Navigation Basse */}
+        <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white/95 backdrop-blur-xl border-t border-slate-100 flex gap-4 z-40 max-w-md mx-auto no-print shadow-[0_-20px_50px_rgba(0,0,0,0.1)] rounded-t-[2.5rem]">
           {step > 1 && (
-            <button onClick={() => setStep(step - 1)} className="p-5 bg-slate-100 rounded-3xl border border-slate-200 text-slate-500 active:scale-90 transition-transform"><ChevronLeft size={24} /></button>
+            <button onClick={() => setStep(step - 1)} className="p-6 bg-slate-100 rounded-3xl border border-slate-200 text-slate-500 active:scale-90 transition-transform">
+              <ChevronLeft size={24} />
+            </button>
           )}
-          <button onClick={() => step < 3 && setStep(step + 1)} className="flex-1 py-5 bg-blue-600 text-white rounded-[2rem] font-black flex items-center justify-center gap-3 shadow-xl uppercase tracking-widest text-[11px] active:scale-95 transition-transform">
-            {step === 3 ? 'Terminer' : 'Suivant'} <ChevronRight size={20} />
+          <button onClick={() => step < 3 && setStep(step + 1)} className="flex-1 py-6 bg-blue-600 text-white rounded-[2rem] font-black flex items-center justify-center gap-3 shadow-xl shadow-blue-100 uppercase tracking-widest text-[12px] active:scale-95 transition-transform">
+            {step === 3 ? 'TERMINER' : 'CONTINUER'} <ChevronRight size={20} />
           </button>
         </footer>
 
@@ -373,15 +439,13 @@ export default function App() {
             .max-w-md { max-width: 100% !important; width: 100% !important; box-shadow: none !important; }
             header, nav, footer { display: none !important; }
             main { padding: 0 !important; }
-            .bg-white { background: transparent !important; }
+            .bg-slate-50, .bg-white { border: none !important; }
           }
-          @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-          @keyframes slide-in { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-          @keyframes zoom-in { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-          .animate-in { animation: fade-in 0.4s ease-out; }
-          .slide-in-from-bottom-2 { animation: slide-in 0.4s ease-out; }
-          .slide-in-from-top-4 { animation: slide-in 0.3s ease-out reverse; }
-          .zoom-in { animation: zoom-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+          @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes zoom-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+          .animate-in { animation: fade-in 0.5s ease-out forwards; }
+          .zoom-in { animation: zoom-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+          * { -webkit-tap-highlight-color: transparent; }
         `}</style>
       </div>
     </div>
