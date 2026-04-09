@@ -13,10 +13,9 @@
         @media print {
             .no-print { display: none !important; }
             body { background: white !important; margin: 0; padding: 0; }
-            .print-all { display: block !important; }
             .room-section { break-inside: avoid; border-left: 2px solid #000 !important; margin-bottom: 20px; padding-left: 15px; }
             .signature-container { break-inside: avoid; margin-top: 30px; }
-            .max-w-3xl { max-width: 100% !important; width: 100% !important; shadow: none !important; }
+            .max-w-3xl { max-width: 100% !important; width: 100% !important; box-shadow: none !important; }
         }
         
         body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
@@ -31,27 +30,70 @@
         }
         .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
         .offline { background-color: #ef4444; }
+
+        /* Animation de chargement */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <div class="h-screen flex flex-col items-center justify-center text-slate-400 font-medium">
+            <div class="loader mb-4"></div>
+            Chargement de l'interface Immo-Alex...
+        </div>
+    </div>
 
+    <!-- Script de démarrage unifié -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-app';
+        // Initialisation sécurisée
+        const startApp = () => {
+            try {
+                const config = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const app = initializeApp(config);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-default';
 
-        // Exportation des fonctions vers l'objet global pour React
-        window.fb = { 
-            auth, db, appId, doc, setDoc, collection, onSnapshot, 
-            signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+                // On expose les services pour le script Babel
+                window.FirebaseSDK = { 
+                    auth, db, appId, doc, setDoc, collection, onSnapshot, 
+                    signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+                };
+                
+                // On prévient React que Firebase est prêt
+                window.dispatchEvent(new Event('firebase-ready'));
+            } catch (e) {
+                console.error("Erreur d'initialisation :", e);
+                document.getElementById('root').innerHTML = `
+                    <div class="p-8 text-center">
+                        <h1 class="text-red-500 font-bold">Erreur de configuration</h1>
+                        <p class="text-sm text-slate-500 mt-2">${e.message}</p>
+                    </div>
+                `;
+            }
         };
+
+        // On attend que le DOM soit prêt
+        if (document.readyState === 'complete') {
+            startApp();
+        } else {
+            window.addEventListener('load', startApp);
+        }
     </script>
 
     <script type="text/babel">
@@ -59,8 +101,6 @@
 
         // --- ICONES ---
         const IconShare = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>;
-        const IconCamera = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>;
-        const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>;
 
         // --- COMPOSANT SIGNATURE ---
         const SignaturePad = ({ label, onSave, savedImage }) => {
@@ -77,6 +117,8 @@
             const start = (e) => {
                 const pos = getPos(e);
                 const ctx = canvasRef.current.getContext('2d');
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
                 ctx.beginPath();
                 ctx.moveTo(pos.x, pos.y);
                 setIsDrawing(true);
@@ -91,6 +133,7 @@
             };
 
             const stop = () => {
+                if (!isDrawing) return;
                 setIsDrawing(false);
                 onSave(canvasRef.current.toDataURL());
             };
@@ -112,6 +155,7 @@
         };
 
         function App() {
+            const [fb, setFb] = useState(window.FirebaseSDK);
             const [step, setStep] = useState(1);
             const [isOnline, setIsOnline] = useState(navigator.onLine);
             const [user, setUser] = useState(null);
@@ -128,47 +172,56 @@
                 signatures: { owner: null, tenant: null }
             });
 
-            // Connexion status
+            // Écouter l'initialisation Firebase
             useEffect(() => {
-                const handleStatus = () => setIsOnline(navigator.onLine);
-                window.addEventListener('online', handleStatus);
-                window.addEventListener('offline', handleStatus);
-                return () => {
-                    window.removeEventListener('online', handleStatus);
-                    window.removeEventListener('offline', handleStatus);
-                };
+                const checkFb = () => { if(window.FirebaseSDK) setFb(window.FirebaseSDK); };
+                window.addEventListener('firebase-ready', checkFb);
+                return () => window.removeEventListener('firebase-ready', checkFb);
             }, []);
 
-            // Firebase Auth (Correction des références)
+            // Authentification
             useEffect(() => {
+                if (!fb) return;
+                
                 const initAuth = async () => {
-                    if (!window.fb) return;
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await window.fb.signInWithCustomToken(window.fb.auth, __initial_auth_token);
+                            await fb.signInWithCustomToken(fb.auth, __initial_auth_token);
                         } else {
-                            await window.fb.signInAnonymously(window.fb.auth);
+                            await fb.signInAnonymously(fb.auth);
                         }
                     } catch (e) { console.error("Auth error", e); }
                 };
+                
                 initAuth();
-                const unsub = window.fb.onAuthStateChanged(window.fb.auth, setUser);
+                const unsub = fb.onAuthStateChanged(fb.auth, (u) => setUser(u));
                 return () => unsub();
-            }, []);
+            }, [fb]);
 
-            // Sync Cloud
+            // Synchronisation
             useEffect(() => {
-                if (!user || !isOnline || !window.fb) return;
+                if (!fb || !user || !isOnline) return;
                 const timer = setTimeout(async () => {
                     setSyncStatus('syncing');
                     try {
-                        const docRef = window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'users', user.uid, 'edl', 'current');
-                        await window.fb.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
+                        const docRef = fb.doc(fb.db, 'artifacts', fb.appId, 'users', user.uid, 'edl', 'current');
+                        await fb.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
                         setSyncStatus('saved');
-                    } catch (e) { setSyncStatus('idle'); }
+                    } catch (e) { 
+                        setSyncStatus('idle'); 
+                    }
                 }, 2000);
                 return () => clearTimeout(timer);
-            }, [formData, user, isOnline]);
+            }, [formData, user, isOnline, fb]);
+
+            if (!fb) {
+                return (
+                    <div className="h-screen flex flex-col items-center justify-center text-slate-400 font-medium">
+                        <div className="loader mb-4"></div>
+                        Connexion aux services de données...
+                    </div>
+                );
+            }
 
             const addRoom = () => {
                 setFormData({...formData, rooms: [...formData.rooms, { id: Date.now(), name: 'Nouvelle pièce', elements: [] }]});
@@ -178,23 +231,9 @@
                 setFormData({
                     ...formData,
                     rooms: formData.rooms.map(r => r.id === roomId ? {
-                        ...r, elements: [...r.elements, { id: Date.now(), label: 'Élément', status: 'Bon', comment: '', photos: [] }]
+                        ...r, elements: [...r.elements, { id: Date.now(), label: 'Nouvel élément', status: 'Bon', comment: '', photos: [] }]
                     } : r)
                 });
-            };
-
-            const handleShare = async () => {
-                if (navigator.share) {
-                    try {
-                        await navigator.share({
-                            title: 'Immo-Alex | État des Lieux',
-                            text: `Rapport pour : ${formData.address}`,
-                            url: window.location.href
-                        });
-                    } catch (e) { window.print(); }
-                } else {
-                    window.print();
-                }
             };
 
             return (
@@ -209,18 +248,18 @@
                                 </span>
                             </div>
                         </div>
-                        <button onClick={handleShare} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+                        <button onClick={() => window.print()} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
                             <IconShare />
                         </button>
                     </header>
 
-                    <div className="no-print flex border-b bg-white">
+                    <nav className="no-print flex border-b bg-white">
                         {[1, 2, 3].map(n => (
-                            <button key={n} onClick={() => setStep(n)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest ${step === n ? 'text-blue-600 border-b-4 border-blue-600' : 'text-slate-400'}`}>
+                            <button key={n} onClick={() => setStep(n)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${step === n ? 'text-blue-600 border-b-4 border-blue-600 bg-blue-50/30' : 'text-slate-400'}`}>
                                 {n === 1 ? 'Propriété' : n === 2 ? 'Inventaire' : 'Signatures'}
                             </button>
                         ))}
-                    </div>
+                    </nav>
 
                     <main className="p-6 flex-1">
                         <div className="hidden print:block border-b-4 border-black pb-4 mb-6">
@@ -228,62 +267,88 @@
                             <p className="font-bold mt-2">Date : {formData.date}</p>
                         </div>
 
-                        {/* SECTION INFOS */}
-                        <div className={`${step === 1 ? 'block' : 'hidden print:block'} space-y-6`}>
-                            <div className="p-4 bg-slate-50 rounded-xl border print:p-0 print:bg-transparent print:border-none">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Adresse du Bien</label>
-                                <input type="text" className="w-full bg-transparent text-xl font-bold outline-none border-b focus:border-blue-500" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Adresse..." />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-4 bg-slate-50 rounded-xl border print:p-0 print:bg-transparent print:border-none">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Propriétaire</label>
-                                    <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} />
+                        {step === 1 && (
+                            <div className="space-y-6">
+                                <div className="p-4 bg-slate-50 rounded-xl border">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Adresse du Bien</label>
+                                    <input type="text" className="w-full bg-transparent text-xl font-bold outline-none border-b border-transparent focus:border-blue-500 transition-colors" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Ex: 12 rue de la Paix, Paris" />
                                 </div>
-                                <div className="p-4 bg-slate-50 rounded-xl border print:p-0 print:bg-transparent print:border-none">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Locataire</label>
-                                    <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* SECTION PIÈCES */}
-                        <div className={`${step === 2 ? 'block' : 'hidden print:block'} mt-8 space-y-8`}>
-                            {formData.rooms.map(room => (
-                                <div key={room.id} className="room-section">
-                                    <input className="text-xl font-black uppercase tracking-tight mb-4 w-full outline-none bg-transparent" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
-                                    <div className="space-y-4">
-                                        {room.elements.map(el => (
-                                            <div key={el.id} className="p-4 border rounded-xl bg-white shadow-sm print:shadow-none">
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <input className="font-bold outline-none flex-1" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                                                    <select className="text-[10px] font-bold border rounded p-1" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
-                                                        <option>Bon</option><option>Usage</option><option>Mauvais</option>
-                                                    </select>
-                                                </div>
-                                                <textarea className="w-full text-xs italic text-slate-500 outline-none border-none resize-none" placeholder="Commentaire..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
-                                            </div>
-                                        ))}
-                                        <button onClick={() => addElement(room.id)} className="no-print w-full py-2 border-2 border-dashed rounded-lg text-slate-300 text-[10px] font-bold uppercase">+ Ajouter Élément</button>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="p-4 bg-slate-50 rounded-xl border">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Propriétaire / Bailleur</label>
+                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} placeholder="Nom..." />
+                                    </div>
+                                    <div className="p-4 bg-slate-50 rounded-xl border">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Locataire / Preneur</label>
+                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} placeholder="Nom..." />
                                     </div>
                                 </div>
-                            ))}
-                            <button onClick={addRoom} className="no-print w-full py-4 bg-slate-100 rounded-xl text-slate-500 font-black uppercase text-xs hover:bg-slate-200 transition-colors">Ajouter une Pièce</button>
-                        </div>
-
-                        {/* SECTION SIGNATURES */}
-                        <div className={`${step === 3 ? 'block' : 'hidden print:block'} mt-10`}>
-                            <h2 className="text-sm font-black text-blue-600 uppercase mb-6 tracking-widest">Signatures des Parties</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                <SignaturePad label="Signature Bailleur" savedImage={formData.signatures.owner} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
-                                <SignaturePad label="Signature Locataire" savedImage={formData.signatures.tenant} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
                             </div>
+                        )}
+
+                        {step === 2 && (
+                            <div className="space-y-8">
+                                {formData.rooms.map(room => (
+                                    <div key={room.id} className="room-section border-l-4 border-blue-100 pl-4 py-2">
+                                        <input className="text-xl font-black uppercase tracking-tight mb-4 w-full outline-none bg-transparent text-blue-900" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                                        <div className="space-y-4">
+                                            {room.elements.map(el => (
+                                                <div key={el.id} className="p-4 border rounded-xl bg-white shadow-sm">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <input className="font-bold outline-none flex-1 text-slate-700" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                        <select className="text-[10px] font-bold border rounded p-1 bg-slate-50" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
+                                                            <option>Bon</option><option>Usage</option><option>Mauvais</option>
+                                                        </select>
+                                                    </div>
+                                                    <textarea className="w-full text-xs italic text-slate-400 outline-none border-none resize-none bg-transparent" placeholder="Observation..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+                                                </div>
+                                            ))}
+                                            <button onClick={() => addElement(room.id)} className="w-full py-2 border-2 border-dashed rounded-lg text-slate-300 text-[10px] font-bold uppercase">+ Ajouter un élément</button>
+                                        </div>
+                                    </div>
+                                ))}
+                                <button onClick={addRoom} className="w-full py-4 bg-slate-100 rounded-xl text-slate-500 font-black uppercase text-xs hover:bg-slate-200">Ajouter une Pièce</button>
+                            </div>
+                        )}
+
+                        {step === 3 && (
+                            <div className="space-y-8">
+                                <h2 className="text-sm font-black text-blue-600 uppercase tracking-widest border-b pb-2">Validation des parties</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <SignaturePad label="Le Bailleur" savedImage={formData.signatures.owner} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
+                                    <SignaturePad label="Le Locataire" savedImage={formData.signatures.tenant} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Vue Impression */}
+                        <div className="hidden print:block space-y-6">
+                            <div className="p-4 border">
+                                <p><strong>Adresse :</strong> {formData.address}</p>
+                                <p><strong>Bailleur :</strong> {formData.owner}</p>
+                                <p><strong>Locataire :</strong> {formData.tenant}</p>
+                            </div>
+                            {formData.rooms.map(room => (
+                                <div key={room.id} className="room-section">
+                                    <h3 className="text-lg font-bold border-b mb-2">{room.name}</h3>
+                                    {room.elements.map(el => (
+                                        <div key={el.id} className="grid grid-cols-3 gap-2 border-b py-1 text-sm">
+                                            <span>{el.label}</span>
+                                            <span className="italic">{el.status}</span>
+                                            <span>{el.comment}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
                         </div>
                     </main>
 
                     <footer className="no-print p-6 border-t bg-slate-50 flex gap-4 sticky bottom-0 z-40">
-                        {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-3 bg-white border font-bold rounded-xl text-slate-500">Retour</button>}
-                        <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">
-                            {step < 3 ? 'Suivant' : 'Imprimer / PDF'}
+                        {step > 1 && (
+                            <button onClick={() => setStep(step-1)} className="px-6 py-3 bg-white border font-bold rounded-xl text-slate-500">Précédent</button>
+                        )}
+                        <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest shadow-lg">
+                            {step < 3 ? 'Suivant' : 'Finaliser & PDF'}
                         </button>
                     </footer>
                 </div>
