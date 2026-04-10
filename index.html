@@ -1,575 +1,434 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot } from 'firebase/firestore';
-import { 
-  Camera, Check, ChevronLeft, ChevronRight, 
-  Plus, Trash2, Share2, MessageCircle, 
-  ClipboardCheck, Home, PenTool, FileText,
-  Loader2, Utensils, X
-} from 'lucide-react';
-
-// --- Configuration Firebase ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'appart-alex-pro';
-
-// --- Composant Signature ---
-const SignaturePad = ({ label, onSave, savedImage, readOnly }) => {
-  const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-
-  const getPos = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
-  };
-
-  const start = (e) => {
-    if (readOnly) return;
-    const pos = getPos(e);
-    const ctx = canvasRef.current.getContext('2d');
-    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0f172a';
-    ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
-    setIsDrawing(true);
-  };
-
-  const move = (e) => {
-    if (!isDrawing || readOnly) return;
-    const pos = getPos(e);
-    const ctx = canvasRef.current.getContext('2d');
-    ctx.lineTo(pos.x, pos.y); ctx.stroke();
-  };
-
-  const stop = () => {
-    if (!isDrawing || readOnly) return;
-    setIsDrawing(false);
-    if (canvasRef.current) {
-      onSave(canvasRef.current.toDataURL());
-    }
-  };
-
-  const clear = () => {
-    if (readOnly) return;
-    const ctx = canvasRef.current.getContext('2d');
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    onSave(null);
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex justify-between items-center px-1">
-        <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{label}</span>
-        {!readOnly && <button onClick={clear} className="text-[10px] font-bold text-red-500 uppercase">Effacer</button>}
-      </div>
-      <div className="relative h-40 w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl overflow-hidden">
-        {!readOnly && (
-          <canvas 
-            ref={canvasRef} 
-            width={400} height={160} 
-            className="w-full h-full touch-none cursor-crosshair"
-            onMouseDown={start} onMouseMove={move} onMouseUp={stop}
-            onTouchStart={start} onTouchMove={move} onTouchEnd={stop}
-          />
-        )}
-        {savedImage && <img src={savedImage} alt="Signature" className="absolute inset-0 w-full h-full object-contain p-2 pointer-events-none" />}
-      </div>
-    </div>
-  );
-};
-
-export default function App() {
-  // --- États ---
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState('list');
-  const [edlList, setEdlList] = useState([]);
-  const [currentId, setCurrentId] = useState(null);
-  const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [isReadOnly, setIsReadOnly] = useState(false);
-
-  // --- Initialisation Auth ---
-  useEffect(() => {
-    const init = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Appart-Alex | Gestion Multi-EDL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; margin: 0; padding: 0; color: black !important; }
+            .print-only { display: block !important; }
+            .room-section, .inventory-section { break-inside: avoid; border-left: 3px solid #000 !important; margin-bottom: 30px; padding-left: 20px; page-break-inside: avoid; }
+            .signature-container { break-inside: avoid; margin-top: 40px; page-break-inside: avoid; }
+            .max-w-3xl { max-width: 100% !important; width: 100% !important; box-shadow: none !important; margin: 0 !important; }
+            header, nav, footer, .photo-delete-btn, .add-btn, .counter-btn { display: none !important; }
+            input, textarea, select { border: none !important; background: transparent !important; appearance: none !important; padding: 0 !important; font-weight: bold !important; }
+            .photo-grid { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; margin-top: 10px !important; }
+            img { max-width: 100% !important; border: 1px solid #eee !important; display: block !important; }
         }
-      } catch (err) {
-        console.error("Erreur Auth:", err);
-      }
-    };
-    init();
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-      const params = new URLSearchParams(window.location.search);
-      const edlIdParam = params.get('edlId');
-      const uidParam = params.get('uid');
-      if (edlIdParam && uidParam) {
-        loadSharedEdl(edlIdParam, uidParam);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // --- Chargement Liste ---
-  useEffect(() => {
-    if (!user || isReadOnly) return;
-    const q = collection(db, 'artifacts', appId, 'users', user.uid, 'edl');
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = [];
-      snapshot.forEach(d => docs.push({ id: d.id, ...d.data() }));
-      setEdlList(docs);
-    }, (error) => console.error("Erreur Snapshot List:", error));
-    return () => unsubscribe();
-  }, [user, isReadOnly]);
-
-  // --- Auto-sauvegarde ---
-  useEffect(() => {
-    if (!user || !formData || !currentId || isReadOnly) return;
-    const timer = setTimeout(async () => {
-      try {
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'edl', currentId), formData);
-      } catch (err) {
-        console.error("Erreur sauvegarde:", err);
-      }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [formData, currentId, user, isReadOnly]);
-
-  const loadSharedEdl = async (id, uid) => {
-    setLoading(true);
-    try {
-      const docRef = doc(db, 'artifacts', appId, 'users', uid, 'edl', id);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        setFormData(snap.data());
-        setCurrentId(id);
-        setIsReadOnly(true);
-        setView('editor');
-        setStep(4);
-      }
-    } catch (err) {
-      console.error("Erreur chargement partagé:", err);
-    }
-    setLoading(false);
-  };
-
-  const createNew = () => {
-    const id = "edl_" + Date.now();
-    const newData = {
-      address: "",
-      date: new Date().toLocaleDateString('fr-FR'),
-      tenant: "",
-      owner: "Alexandre",
-      rooms: [
-        { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte / Serrures', status: 'Bon', comment: '', photos: [] }] },
-        { id: 2, name: 'Séjour', elements: [{ id: 201, label: 'Murs / Peinture', status: 'Neuf', comment: '', photos: [] }] },
-        { id: 3, name: 'Cuisine', elements: [{ id: 301, label: 'Plan de travail', status: 'Bon', comment: '', photos: [] }] }
-      ],
-      inventory: [
-        { id: 'i1', label: 'Fourchettes', count: 6 },
-        { id: 'i2', label: 'Couteaux', count: 6 },
-        { id: 'i3', label: 'Cuillères', count: 6 },
-        { id: 'i4', label: 'Casseroles', count: 2 },
-        { id: 'i5', label: 'Poêles', count: 2 },
-        { id: 'i6', label: 'Passoire', count: 1 },
-        { id: 'i7', label: 'Assiettes', count: 6 }
-      ],
-      generalComments: "",
-      signatures: { owner: null, tenant: null }
-    };
-    setFormData(newData);
-    setCurrentId(id);
-    setIsReadOnly(false);
-    setStep(1);
-    setView('editor');
-  };
-
-  // --- Gestion Photos ---
-  const handlePhotoUpload = (roomId, elId, e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (upload) => {
-      const base64 = upload.target.result;
-      setFormData({
-        ...formData,
-        rooms: formData.rooms.map(r => r.id === roomId ? {
-          ...r,
-          elements: r.elements.map(el => el.id === elId ? {
-            ...el,
-            photos: [...(el.photos || []), base64]
-          } : el)
-        } : r)
-      });
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removePhoto = (roomId, elId, photoIdx) => {
-    setFormData({
-      ...formData,
-      rooms: formData.rooms.map(r => r.id === roomId ? {
-        ...r,
-        elements: r.elements.map(el => el.id === elId ? {
-          ...el,
-          photos: el.photos.filter((_, idx) => idx !== photoIdx)
-        } : el)
-      } : r)
-    });
-  };
-
-  // --- Fonctions de Partage ---
-  const getShareUrl = () => {
-    const baseUrl = window.location.href.split('?')[0];
-    return `${baseUrl}?edlId=${currentId}&uid=${user?.uid}`;
-  };
-
-  const shareWhatsApp = () => {
-    const text = `Bonjour, voici le lien de votre état des lieux pour l'appartement : ${getShareUrl()}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  const shareNative = async () => {
-    const shareData = {
-      title: 'État des Lieux Appart-Alex',
-      text: `Consultez le rapport pour : ${formData.address}`,
-      url: getShareUrl()
-    };
-    if (navigator.share) {
-      try { await navigator.share(shareData); } catch (e) { console.error("Erreur share:", e); }
-    } else {
-      try {
-        await navigator.clipboard.writeText(getShareUrl());
-      } catch (err) {
-        console.error("Erreur clipboard:", err);
-      }
-    }
-  };
-
-  // --- Rendu ---
-  if (loading) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
-      <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
-      <span className="font-black italic uppercase text-slate-400">Chargement...</span>
-    </div>
-  );
-
-  if (view === 'list') return (
-    <div className="max-w-xl mx-auto p-6 min-h-screen bg-slate-50">
-      <div className="flex justify-between items-center mb-10">
-        <h1 className="text-3xl font-black italic uppercase tracking-tighter text-slate-900">Appart-Alex</h1>
-        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-[10px] font-bold">A</div>
-      </div>
-
-      <button onClick={createNew} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-sm shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-transform mb-10">
-        <Plus size={20} /> Nouvel État des Lieux
-      </button>
-
-      <div className="space-y-4">
-        <h2 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">Derniers rapports</h2>
-        {edlList.length === 0 ? (
-          <div className="text-center py-10 text-slate-300 font-bold uppercase text-[10px] tracking-widest">Aucun rapport trouvé</div>
-        ) : (
-          edlList.map(item => (
-            <div 
-              key={item.id} 
-              onClick={() => { setFormData(item); setCurrentId(item.id); setIsReadOnly(false); setView('editor'); setStep(1); }}
-              className="group bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer flex justify-between items-center"
-            >
-              <div className="flex gap-4 items-center">
-                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                  <Home size={24} />
-                </div>
-                <div>
-                  <p className="font-black uppercase text-xs text-slate-800">{item.address || "Adresse non définie"}</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-1">{item.date} • {item.tenant || "Sans nom"}</p>
-                </div>
-              </div>
-              <ChevronRight size={18} className="text-slate-300" />
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="max-w-2xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col">
-      {/* Header */}
-      <header className="bg-slate-900 text-white p-5 sticky top-0 z-50 flex justify-between items-center no-print">
-        <button onClick={() => isReadOnly ? window.location.search = "" : setView('list')} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
-          <ChevronLeft />
-        </button>
-        <div className="text-center">
-          <span className="block text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Rapport Pro</span>
-          <span className="font-black italic uppercase text-sm tracking-tighter">Appart-Alex</span>
-        </div>
-        <div className="flex gap-2">
-           {isReadOnly ? (
-             <button onClick={() => window.print()} className="p-2 bg-slate-800 rounded-xl"><FileText size={20}/></button>
-           ) : (
-             <button onClick={shareNative} className="p-2 bg-blue-600 rounded-xl shadow-lg shadow-blue-900/20"><Share2 size={20} /></button>
-           )}
-        </div>
-      </header>
-
-      {/* Étapes Navigation */}
-      {!isReadOnly && (
-        <nav className="flex px-4 py-2 border-b bg-white sticky top-[72px] z-40 no-print overflow-x-auto">
-          {[
-            { id: 1, label: 'Infos', icon: <Home size={14}/> },
-            { id: 2, label: 'Pièces', icon: <ClipboardCheck size={14}/> },
-            { id: 3, label: 'Équipements', icon: <Utensils size={14}/> },
-            { id: 4, label: 'Fin', icon: <Check size={14}/> }
-          ].map(s => (
-            <button 
-              key={s.id} 
-              onClick={() => setStep(s.id)}
-              className={`flex-1 min-w-[80px] flex flex-col items-center gap-1 py-3 transition-all ${step === s.id ? 'text-blue-600 scale-105' : 'text-slate-300'}`}
-            >
-              {s.icon}
-              <span className="text-[9px] font-black uppercase tracking-widest">{s.label}</span>
-              {step === s.id && <div className="h-1 w-8 bg-blue-600 rounded-full mt-1 animate-pulse" />}
-            </button>
-          ))}
-        </nav>
-      )}
-
-      {/* Contenu */}
-      <main className="p-6 flex-1 bg-slate-50/50">
         
-        {/* VUE RAPPORT FINAL */}
-        {(isReadOnly || step === 4) && formData && (
-          <div className="space-y-12">
-            <div className="text-center mb-12">
-              <h2 className="text-4xl font-black uppercase italic tracking-tighter mb-4 text-slate-900">État des Lieux</h2>
-              <div className="h-1 w-20 bg-blue-600 mx-auto mb-6"></div>
-              <p className="text-lg font-bold text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">{formData.address || "ADRESSE NON DÉFINIE"}</p>
-              <p className="mt-4 text-[10px] font-black uppercase text-slate-400 tracking-[0.3em]">Édité le {formData.date}</p>
-            </div>
+        body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+        .signature-pad { border: 2px dashed #cbd5e1; background: #fff; touch-action: none; cursor: crosshair; }
+        .status-pulse { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
+        .offline { background-color: #ef4444; box-shadow: 0 0 8px #ef4444; }
+        .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #3b82f6; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-            {/* Pièces et Photos */}
-            <div className="space-y-10">
-              {formData.rooms.map(room => (
-                <div key={room.id} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-blue-600 mb-6 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-blue-600 rounded-full"></div> {room.name}
-                  </h3>
-                  <div className="space-y-8">
-                    {room.elements.map(el => (
-                      <div key={el.id} className="border-b border-slate-50 pb-6 last:border-0">
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="font-bold text-sm text-slate-800 uppercase">{el.label}</span>
-                          <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase ${el.status === 'Neuf' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                            {el.status}
-                          </span>
-                        </div>
-                        {el.comment && <p className="text-xs text-slate-500 italic mb-4">« {el.comment} »</p>}
-                        
-                        {/* Galerie Photos de l'élément */}
-                        {el.photos && el.photos.length > 0 && (
-                          <div className="grid grid-cols-3 gap-2 mt-2">
-                            {el.photos.map((p, idx) => (
-                              <div key={idx} className="aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
-                                <img src={p} alt={`Preuve ${idx}`} className="w-full h-full object-cover" />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-            {/* Inventaire Équipements */}
-            <div className="bg-slate-900 text-white rounded-3xl p-8">
-               <h3 className="text-xs font-black uppercase tracking-widest text-blue-400 mb-6 flex items-center gap-2">
-                  <Utensils size={14}/> Inventaire des Équipements
-               </h3>
-               <div className="grid grid-cols-2 gap-4">
-                  {formData.inventory.map(item => (
-                    <div key={item.id} className="flex justify-between items-center border-b border-white/10 pb-2">
-                      <span className="text-xs font-bold uppercase">{item.label}</span>
-                      <span className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center font-black text-xs">{item.count}</span>
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'appart-alex';
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            window.FB_BRIDGE = { auth, db, appId, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc, signInAnonymously, onAuthStateChanged, signInWithCustomToken };
+            window.dispatchEvent(new Event('fb-ready'));
+        } catch (e) { console.error("Firebase Init Error:", e); }
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const SignaturePad = ({ label, onSave, savedImage }) => {
+            const canvasRef = useRef(null);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const getPos = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            };
+            const start = (e) => {
+                const pos = getPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
+                ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
+                setIsDrawing(true);
+            };
+            const move = (e) => {
+                if (!isDrawing) return;
+                const pos = getPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.lineTo(pos.x, pos.y); ctx.stroke();
+            };
+            const stop = () => { if (!isDrawing) return; setIsDrawing(false); onSave(canvasRef.current.toDataURL()); };
+            const clear = () => {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                onSave(null);
+            };
+            return (
+                <div className="mb-4 signature-container">
+                    <div className="flex justify-between items-center mb-2">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase">{label}</label>
+                        <button onClick={clear} className="no-print text-[9px] font-bold text-red-400 uppercase">Effacer</button>
                     </div>
-                  ))}
-               </div>
-            </div>
-
-            {/* Commentaires Généraux */}
-            {formData.generalComments && (
-              <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100">
-                <h3 className="text-[10px] font-black uppercase text-blue-400 mb-4 tracking-widest">Observations Particulières</h3>
-                <p className="text-sm text-blue-900 italic leading-relaxed">"{formData.generalComments}"</p>
-              </div>
-            )}
-
-            {/* Signatures */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t-2 border-slate-100">
-               <SignaturePad label="Propriétaire (Alexandre)" savedImage={formData.signatures.owner} readOnly={true} />
-               <SignaturePad label="Locataire" savedImage={formData.signatures.tenant} readOnly={true} />
-            </div>
-
-            {/* Share Footer */}
-            {!isReadOnly && step === 4 && (
-              <div className="no-print p-8 bg-blue-50 border-2 border-blue-200 rounded-[40px] mt-10">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white">
-                    <Share2 />
-                  </div>
-                  <div>
-                    <h4 className="font-black uppercase text-sm text-blue-900">Partager le rapport</h4>
-                    <p className="text-xs text-blue-700">Envoyez l'exemplaire numérique au locataire.</p>
-                  </div>
+                    <div className="relative">
+                        <canvas ref={canvasRef} width={400} height={150} className={`signature-pad w-full h-32 rounded-lg border-2 border-dashed border-slate-200 ${savedImage ? 'print:hidden' : ''}`} onMouseDown={start} onMouseMove={move} onMouseUp={stop} onTouchStart={start} onTouchMove={move} onTouchEnd={stop} />
+                        {savedImage && <img src={savedImage} className="hidden print:block w-full h-32 object-contain border rounded-lg" />}
+                    </div>
                 </div>
-                <button onClick={shareWhatsApp} className="w-full bg-[#25D366] text-white py-5 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-3 mb-3">
-                  <MessageCircle fill="currentColor" /> Partager sur WhatsApp
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+            );
+        };
 
-        {/* ÉTAPE 1: INFOS */}
-        {!isReadOnly && step === 1 && formData && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-             <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-4">Lieu du logement</label>
-                <input 
-                  type="text" 
-                  className="w-full text-2xl font-black uppercase outline-none placeholder:text-slate-200"
-                  placeholder="24 RUE DU LOUVRE..."
-                  value={formData.address}
-                  onChange={e => setFormData({...formData, address: e.target.value.toUpperCase()})}
-                />
-             </div>
-             <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-                  <label className="text-[9px] font-black uppercase text-slate-400 block mb-2">Propriétaire</label>
-                  <input className="w-full font-bold text-sm outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} />
-                </div>
-                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-                  <label className="text-[9px] font-black uppercase text-slate-400 block mb-2">Locataire</label>
-                  <input className="w-full font-bold text-sm outline-none" placeholder="Nom..." value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} />
-                </div>
-             </div>
-          </div>
-        )}
+        function App() {
+            const [view, setView] = useState('list');
+            const [isInitialized, setIsInitialized] = useState(false);
+            const [user, setUser] = useState(null);
+            const [edlList, setEdlList] = useState([]);
+            const [currentEdlId, setCurrentEdlId] = useState(null);
+            const [step, setStep] = useState(1);
+            const [syncStatus, setSyncStatus] = useState('offline');
+            const [isUploading, setIsUploading] = useState(false);
+            const fileInputRef = useRef(null);
+            const [activeElement, setActiveElement] = useState(null);
+            const [formData, setFormData] = useState(null);
 
-        {/* ÉTAPE 2: PIÈCES ET PHOTOS */}
-        {!isReadOnly && step === 2 && formData && (
-          <div className="space-y-6">
-            {formData.rooms.map(room => (
-              <div key={room.id} className="bg-white rounded-[40px] p-8 border border-slate-100 shadow-sm">
-                <div className="flex justify-between items-center mb-6">
-                  <input className="text-xl font-black uppercase outline-none" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
-                  <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément', status: 'Bon', comment: '', photos: []}]} : r)})} className="p-2 bg-slate-50 rounded-xl text-blue-600"><Plus size={18}/></button>
-                </div>
-                
-                <div className="space-y-8">
-                  {room.elements.map(el => (
-                    <div key={el.id} className="bg-slate-50 p-6 rounded-3xl relative">
-                      <div className="flex justify-between items-center mb-4">
-                        <input className="bg-transparent font-bold text-sm uppercase outline-none flex-1 mr-2" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
-                        <select className="text-[10px] font-black uppercase bg-white px-3 py-2 rounded-xl border-0 shadow-sm" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
-                          <option>Neuf</option><option>Bon</option><option>Moyen</option><option>Mauvais</option>
-                        </select>
-                      </div>
-                      
-                      <textarea className="w-full bg-white p-4 rounded-2xl text-xs outline-none border border-slate-100 mb-4" placeholder="Observations spécifiques..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+            const defaultData = () => ({
+                address: "",
+                date: new Date().toLocaleDateString('fr-FR'),
+                owner: "", tenant: "",
+                rooms: [{ id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'Bon', comment: '', photos: [] }] }],
+                inventory: [
+                    { id: 201, label: 'Assiettes plates', count: 0 },
+                    { id: 202, label: 'Assiettes creuses', count: 0 },
+                    { id: 203, label: 'Verres', count: 0 },
+                    { id: 204, label: 'Couverts (Fourchettes/Couteaux/Cuillères)', count: 0 }
+                ],
+                generalComments: "",
+                signatures: { owner: null, tenant: null }
+            });
 
-                      {/* Gestion Photos */}
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {el.photos && el.photos.map((p, pIdx) => (
-                          <div key={pIdx} className="w-16 h-16 rounded-xl bg-white border border-slate-200 relative group overflow-hidden shadow-sm">
-                            <img src={p} alt="" className="w-full h-full object-cover" />
-                            <button onClick={() => removePhoto(room.id, el.id, pIdx)} className="absolute top-0 right-0 p-1 bg-red-500 text-white rounded-bl-lg">
-                              <X size={10} />
-                            </button>
-                          </div>
+            const compressImage = (base64) => {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    img.src = base64;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 600; 
+                        let width = img.width; let height = img.height;
+                        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                        canvas.width = width; canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.5));
+                    };
+                });
+            };
+
+            useEffect(() => {
+                const initAuth = async () => {
+                    if (!window.FB_BRIDGE) return;
+                    const b = window.FB_BRIDGE;
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) { await b.signInWithCustomToken(b.auth, __initial_auth_token); }
+                        else { await b.signInAnonymously(b.auth); }
+                    } catch (e) { console.error("Auth Error:", e); }
+                    const unsubscribe = b.onAuthStateChanged(b.auth, (u) => { setUser(u); setSyncStatus(u ? 'online' : 'offline'); setIsInitialized(true); });
+                    return () => unsubscribe();
+                };
+                window.addEventListener('fb-ready', initAuth);
+                if (window.FB_BRIDGE) initAuth();
+                return () => window.removeEventListener('fb-ready', initAuth);
+            }, []);
+
+            useEffect(() => {
+                if (!user || !window.FB_BRIDGE?.db) return;
+                const b = window.FB_BRIDGE;
+                const path = b.collection(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl');
+                const unsubscribe = b.onSnapshot(path, (s) => {
+                    const list = []; s.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+                    setEdlList(list);
+                }, (e) => console.error(e));
+                return () => unsubscribe();
+            }, [user]);
+
+            useEffect(() => {
+                if (!user || !window.FB_BRIDGE?.db || !formData || !currentEdlId) return;
+                const b = window.FB_BRIDGE;
+                const timer = setTimeout(async () => {
+                    setSyncStatus('syncing');
+                    try {
+                        const docRef = b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', currentEdlId);
+                        await b.setDoc(docRef, formData, { merge: true });
+                        setSyncStatus('online');
+                    } catch (e) { setSyncStatus('offline'); }
+                }, 1500);
+                return () => clearTimeout(timer);
+            }, [formData, user, currentEdlId]);
+
+            const updateInventory = (id, delta) => {
+                setFormData({
+                    ...formData,
+                    inventory: formData.inventory.map(item => 
+                        item.id === id ? { ...item, count: Math.max(0, item.count + delta) } : item
+                    )
+                });
+            };
+
+            const addInventoryItem = () => {
+                setFormData({
+                    ...formData,
+                    inventory: [...formData.inventory, { id: Date.now(), label: 'Nouvel article', count: 0 }]
+                });
+            };
+
+            const handlePhoto = async (e) => {
+                const file = e.target.files[0];
+                if (!file || !activeElement) return;
+                setIsUploading(true);
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const compressed = await compressImage(event.target.result);
+                    setFormData(prev => ({
+                        ...prev,
+                        rooms: prev.rooms.map(r => r.id === activeElement.roomId ? {
+                            ...r,
+                            elements: r.elements.map(el => el.id === activeElement.elId ? {
+                                ...el, photos: [...(el.photos || []), compressed].slice(-6)
+                            } : el)
+                        } : r)
+                    }));
+                    setIsUploading(false);
+                };
+                reader.readAsDataURL(file);
+            };
+
+            if (!isInitialized) return <div className="h-screen flex items-center justify-center font-black italic animate-pulse">Appart-Alex</div>;
+
+            if (view === 'list') return (
+                <div className="max-w-xl mx-auto p-6 min-h-screen">
+                    <div className="flex justify-between items-center mb-10">
+                        <h1 className="text-3xl font-black italic uppercase">Appart-Alex</h1>
+                        <div className={`status-pulse ${syncStatus === 'online' ? 'online' : 'offline'}`}></div>
+                    </div>
+                    <button onClick={() => { setFormData(defaultData()); setCurrentEdlId("edl_"+Date.now()); setView('editor'); setStep(1); }} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black uppercase text-sm shadow-xl mb-8">+ Nouvel État des Lieux</button>
+                    <div className="space-y-4">
+                        <h2 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">Historique</h2>
+                        {edlList.map(item => (
+                            <div key={item.id} onClick={() => { setFormData(item); setCurrentEdlId(item.id); setView('editor'); setStep(1); }} className="p-5 bg-white rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer">
+                                <div><p className="font-bold">{item.address || "Sans adresse"}</p><p className="text-[10px] text-slate-400 font-bold uppercase">{item.date} • {item.tenant || 'Sans locataire'}</p></div>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-slate-200"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                            </div>
                         ))}
-                        <label className="w-16 h-16 rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:bg-white hover:border-blue-400 transition-all">
-                          <Camera size={20} />
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(room.id, el.id, e)} />
-                        </label>
-                      </div>
                     </div>
-                  ))}
                 </div>
-              </div>
-            ))}
-            <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle pièce', elements: []}]})} className="w-full py-6 border-4 border-dashed border-slate-200 rounded-[40px] font-black uppercase text-slate-300 hover:text-blue-400 hover:border-blue-200 transition-colors">+ Ajouter une pièce</button>
-          </div>
-        )}
+            );
 
-        {/* ÉTAPE 3: ÉQUIPEMENTS */}
-        {!isReadOnly && step === 3 && formData && (
-          <div className="space-y-4">
-            <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2 mb-4">Inventaire des Équipements</h3>
-            {formData.inventory.map(item => (
-              <div key={item.id} className="bg-white p-6 rounded-3xl border border-slate-100 flex justify-between items-center shadow-sm">
-                <input className="font-bold uppercase text-sm outline-none" value={item.label} onChange={e => setFormData({...formData, inventory: formData.inventory.map(i => i.id === item.id ? {...i, label: e.target.value} : i)})} />
-                <div className="flex items-center gap-4">
-                   <button onClick={() => setFormData({...formData, inventory: formData.inventory.map(i => i.id === item.id ? {...i, count: Math.max(0, i.count-1)} : i)})} className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center border">-</button>
-                   <span className="font-black text-sm w-4 text-center">{item.count}</span>
-                   <button onClick={() => setFormData({...formData, inventory: formData.inventory.map(i => i.id === item.id ? {...i, count: i.count+1} : i)})} className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-md shadow-slate-300">+</button>
+            return (
+                <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
+                    <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
+                    
+                    <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
+                        <button onClick={() => setView('list')} className="p-2"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                        <div className="text-center font-black italic uppercase">Appart-Alex</div>
+                        <button onClick={() => window.print()} className="p-2 bg-blue-600 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></button>
+                    </header>
+
+                    <nav className="no-print flex border-b bg-white sticky top-[68px] z-40 overflow-x-auto scrollbar-hide">
+                        {[1, 2, 3, 4].map(n => (
+                            <button key={n} onClick={() => setStep(n)} className={`flex-1 py-4 px-2 text-[9px] font-black uppercase tracking-tighter ${step === n ? 'text-blue-600 border-b-4 border-blue-600' : 'text-slate-400'}`}>
+                                {n === 1 ? 'Infos' : n === 2 ? 'Visite' : n === 3 ? 'Vaisselle' : 'Signatures'}
+                            </button>
+                        ))}
+                    </nav>
+
+                    <main className="p-6 flex-1">
+                        {/* ZONE D'IMPRESSION */}
+                        <div className="hidden print:block">
+                            <h1 className="text-4xl font-black uppercase italic mb-10 border-b-4 border-black pb-4 text-center">État des Lieux Contradictoire</h1>
+                            <div className="grid grid-cols-2 gap-8 mb-10">
+                                <div className="p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl">
+                                    <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Adresse :</p>
+                                    <p className="font-bold text-xl">{formData.address}</p>
+                                </div>
+                                <div className="space-y-4">
+                                    <p><b>Propriétaire :</b> {formData.owner}</p>
+                                    <p><b>Locataire :</b> {formData.tenant}</p>
+                                    <p><b>Date :</b> {formData.date}</p>
+                                </div>
+                            </div>
+
+                            {formData.rooms.map(r => (
+                                <div key={r.id} className="room-section mb-10">
+                                    <h2 className="text-xl font-black uppercase bg-black text-white px-4 py-2 mb-6 inline-block">{r.name}</h2>
+                                    {r.elements.map(el => (
+                                        <div key={el.id} className="mb-8 border-b border-slate-50 pb-6">
+                                            <div className="flex justify-between font-black uppercase mb-2"><span>{el.label}</span><span>{el.status}</span></div>
+                                            {el.comment && <p className="text-sm italic text-slate-600 mb-4 bg-slate-50 p-2 border-l-2 border-slate-200">{el.comment}</p>}
+                                            <div className="photo-grid">
+                                                {el.photos?.map((p, i) => <img key={i} src={p} className="h-40 w-full object-cover rounded-xl" />)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+
+                            <div className="inventory-section mb-10 mt-10">
+                                <h2 className="text-xl font-black uppercase bg-slate-200 text-black px-4 py-2 mb-6 inline-block">Inventaire de la Vaisselle</h2>
+                                <div className="grid grid-cols-2 gap-x-10 gap-y-2">
+                                    {formData.inventory.map(item => (
+                                        <div key={item.id} className="flex justify-between border-b py-2 text-sm">
+                                            <span>{item.label}</span>
+                                            <span className="font-black">x {item.count}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {formData.generalComments && (
+                                <div className="mb-10 p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl">
+                                    <h2 className="text-[10px] font-black uppercase text-slate-400 mb-4">Observations Générales</h2>
+                                    <p className="text-sm whitespace-pre-wrap">{formData.generalComments}</p>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-10 mt-20 signature-container">
+                                <div className="text-center">
+                                    <p className="text-[10px] font-black uppercase mb-4">Signature Propriétaire</p>
+                                    {formData.signatures.owner && <img src={formData.signatures.owner} className="max-h-32 mx-auto" />}
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-[10px] font-black uppercase mb-4">Signature Locataire</p>
+                                    {formData.signatures.tenant && <img src={formData.signatures.tenant} className="max-h-32 mx-auto" />}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ZONE D'ÉDITION ÉCRAN */}
+                        <div className="no-print space-y-6">
+                            {step === 1 && (
+                                <div className="space-y-6 animate-in fade-in duration-300">
+                                    <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase block mb-2">Adresse du logement</label>
+                                        <input type="text" className="w-full bg-transparent text-xl font-bold outline-none" placeholder="Ex: 12 rue des Alpes, Chambéry" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-5 bg-slate-50 rounded-3xl border border-slate-200">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-2">Bailleur</label>
+                                            <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} />
+                                        </div>
+                                        <div className="p-5 bg-slate-50 rounded-3xl border border-slate-200">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-2">Locataire</label>
+                                            <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {step === 2 && (
+                                <div className="space-y-8 animate-in slide-in-from-right">
+                                    {formData.rooms.map(room => (
+                                        <div key={room.id} className="bg-slate-50 p-5 rounded-[32px] border border-slate-200 shadow-sm">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <input className="text-xl font-black uppercase bg-transparent outline-none flex-1 tracking-tighter" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== room.id)})} className="text-red-300 p-2"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                                            </div>
+                                            <div className="space-y-5">
+                                                {room.elements.map(el => (
+                                                    <div key={el.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                                                        <div className="flex justify-between items-center mb-4">
+                                                            <input className="font-bold text-slate-800 outline-none flex-1" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                            <select className="text-[10px] font-black uppercase bg-slate-100 p-2 px-3 rounded-xl border-none outline-none appearance-none" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
+                                                                <option>Neuf</option><option>Bon</option><option>Moyen</option><option>Mauvais</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="flex gap-3 overflow-x-auto mb-4 scrollbar-hide py-1">
+                                                            <button onClick={() => { setActiveElement({roomId: room.id, elId: el.id}); fileInputRef.current.click(); }} className="w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center border-2 border-dashed border-slate-200 bg-slate-50">{isUploading && activeElement?.elId === el.id ? <div className="spinner"></div> : <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>}</button>
+                                                            {el.photos?.map((p, idx) => (
+                                                                <div key={idx} className="relative shrink-0"><img src={p} className="w-14 h-14 object-cover rounded-2xl" /><button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, i) => i !== idx)} : e2)} : r)})} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>
+                                                            ))}
+                                                        </div>
+                                                        <textarea className="w-full text-xs text-slate-500 bg-slate-50 p-3 rounded-xl outline-none" placeholder="Observations..." rows="2" value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
+                                                    </div>
+                                                ))}
+                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel élément', status: 'Bon', comment: '', photos: []}]} : r)})} className="w-full py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-400 hover:bg-slate-100 transition-colors">+ Ajouter un équipement</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle Pièce', elements: []}]})} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase shadow-xl tracking-widest active:scale-95 transition-transform">Ajouter une Pièce</button>
+                                </div>
+                            )}
+
+                            {step === 3 && (
+                                <div className="space-y-4 animate-in slide-in-from-right duration-300">
+                                    <h3 className="text-xl font-black uppercase mb-4 tracking-tighter">Inventaire de la Vaisselle</h3>
+                                    <div className="space-y-3">
+                                        {formData.inventory.map(item => (
+                                            <div key={item.id} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
+                                                <input className="flex-1 font-bold outline-none mr-4" value={item.label} onChange={e => setFormData({...formData, inventory: formData.inventory.map(i => i.id === item.id ? {...i, label: e.target.value} : i)})} />
+                                                <div className="flex items-center gap-4 bg-slate-50 p-1 rounded-xl border border-slate-100">
+                                                    <button onClick={() => updateInventory(item.id, -1)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center font-black text-slate-400 active:bg-slate-100 shadow-sm">-</button>
+                                                    <span className="w-8 text-center font-black text-blue-600">{item.count}</span>
+                                                    <button onClick={() => updateInventory(item.id, 1)} className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black active:bg-blue-700 shadow-sm shadow-blue-100">+</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <button onClick={addInventoryItem} className="w-full py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest mt-6">+ Ajouter une ligne de vaisselle</button>
+                                </div>
+                            )}
+
+                            {step === 4 && (
+                                <div className="space-y-8 animate-in slide-in-from-right duration-300">
+                                    <div className="p-5 bg-white rounded-3xl border border-slate-200">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase block mb-3">Observations Générales (bloc-notes)</label>
+                                        <textarea className="w-full bg-transparent font-medium text-sm outline-none placeholder:text-slate-300" placeholder="Ex: Remise des clés en 2 exemplaires, compteurs d'eau relevés à 120m3..." rows="4" value={formData.generalComments} onChange={e => setFormData({...formData, generalComments: e.target.value})} />
+                                    </div>
+
+                                    <div className="space-y-10 py-6">
+                                        <SignaturePad label="Propriétaire / Bailleur" savedImage={formData.signatures.owner} onSave={img => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
+                                        <SignaturePad label="Locataire" savedImage={formData.signatures.tenant} onSave={img => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
+                                        <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100">
+                                            <p className="text-[10px] font-black text-blue-400 uppercase mb-2">Finalisation</p>
+                                            <p className="text-xs text-blue-600 leading-relaxed font-medium italic">En signant ce document, les parties reconnaissent l'exactitude des constatations effectuées lors de la visite du logement.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+
+                    <footer className="no-print p-6 border-t bg-white flex gap-4 sticky bottom-0 z-40">
+                        {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-4 bg-white border-2 border-slate-100 font-bold rounded-2xl text-slate-400 active:bg-slate-50 transition-colors">Retour</button>}
+                        <button onClick={() => step < 4 ? setStep(step+1) : window.print()} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-transform">
+                            {step < 4 ? 'Suivant' : 'Finaliser & Exporter PDF'}
+                        </button>
+                    </footer>
                 </div>
-              </div>
-            ))}
-            <button onClick={() => setFormData({...formData, inventory: [...formData.inventory, {id: 'i'+Date.now(), label: 'Nouvel équipement', count: 1}]})} className="w-full py-5 bg-white rounded-3xl border border-slate-100 font-black uppercase text-[10px] text-slate-400">+ Ajouter un équipement</button>
-          </div>
-        )}
+            );
+        }
 
-        {/* ÉTAPE 4: SIGNATURES & COMMENTAIRES */}
-        {!isReadOnly && step === 4 && formData && (
-          <div className="space-y-8 animate-in zoom-in-95 duration-300">
-             <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-4">Observations Particulières</label>
-                <textarea 
-                  className="w-full bg-slate-50 p-6 rounded-3xl text-sm outline-none border border-slate-100 min-h-[140px]"
-                  placeholder="Notes globales, remise des clés, relevés compteurs..."
-                  value={formData.generalComments}
-                  onChange={e => setFormData({...formData, generalComments: e.target.value})}
-                />
-             </div>
-
-             <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-8">Clôture et Signatures</h3>
-                <SignaturePad label="Signature Propriétaire" savedImage={formData.signatures.owner} onSave={img => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
-                <div className="h-10 border-l border-slate-100 ml-5 my-4"></div>
-                <SignaturePad label="Signature Locataire" savedImage={formData.signatures.tenant} onSave={img => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
-             </div>
-          </div>
-        )}
-      </main>
-
-      {/* Footer Navigation */}
-      {!isReadOnly && (
-        <footer className="bg-white border-t p-6 flex gap-3 no-print sticky bottom-0 z-50">
-          {step > 1 && (
-            <button onClick={() => setStep(step-1)} className="p-5 bg-slate-50 text-slate-400 rounded-3xl border border-slate-200 active:scale-95 transition-transform">
-              <ChevronLeft size={20} />
-            </button>
-          )}
-          <button 
-            onClick={() => step < 4 ? setStep(step+1) : window.print()}
-            className="flex-1 bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-slate-300 flex items-center justify-center gap-2 active:scale-95 transition-transform"
-          >
-            {step < 4 ? 'Suivant' : 'Terminer & Signer'} <ChevronRight size={16} />
-          </button>
-        </footer>
-      )}
-    </div>
-  );
-}
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
