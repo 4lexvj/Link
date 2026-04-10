@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>APPART-ALEXIA | État des Lieux Pro</title>
+    <title>APPART-ALEX'S | État des Lieux Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -11,15 +11,16 @@
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .signature-canvas { touch-action: none; cursor: crosshair; }
         
-        /* Styles spécifiques pour l'impression (Génération PDF) */
+        /* Styles spécifiques pour l'impression (Génération PDF Pro) */
         @media print {
+            @page { size: A4; margin: 15mm; }
             .no-print { display: none !important; }
             .print-only { display: block !important; }
-            body { background: white; padding: 0; margin: 0; }
+            body { background: white; padding: 0; margin: 0; font-size: 11pt; }
             #app-container { box-shadow: none !important; border: none !important; max-width: 100% !important; width: 100% !important; margin: 0 !important; }
             #main-content { padding: 0 !important; display: block !important; }
             
-            /* On force l'affichage de toutes les sections au moment de l'impression */
+            /* On force l'affichage séquentiel de toutes les sections */
             #step-container-1, #step-container-2, #step-container-3, #step-container-4 {
                 display: block !important;
                 opacity: 1 !important;
@@ -28,51 +29,61 @@
             }
 
             .print-card { 
-                border: 1px solid #e2e8f0 !important; 
+                border: none !important;
+                border-bottom: 1px solid #eee !important;
                 break-inside: avoid; 
-                margin-bottom: 20px; 
-                border-radius: 12px !important; 
-                padding: 20px !important; 
+                margin-bottom: 30px; 
+                padding: 0 !important; 
                 background: white !important;
             }
+            
             .photo-grid { 
                 display: grid !important; 
                 grid-template-columns: repeat(3, 1fr) !important; 
-                gap: 10px; 
-                margin-top: 10px; 
+                gap: 8px; 
+                margin-top: 12px; 
             }
             .photo-preview { 
-                width: 150px !important; 
-                height: 150px !important; 
+                width: 100% !important; 
+                height: 120px !important; 
                 object-fit: cover !important;
-                border: 1px solid #eee !important;
+                border: 0.5px solid #ddd !important;
+                border-radius: 4px !important;
             }
-            h1, h2, h3 { color: black !important; }
+
+            h1, h2, h3 { color: black !important; text-transform: uppercase !important; }
             input, textarea, select { 
                 border: none !important; 
                 background: transparent !important; 
                 appearance: none !important; 
-                -webkit-appearance: none !important;
-                font-weight: bold !important;
-                padding: 4px 0 !important;
+                font-weight: 600 !important;
+                padding: 2px 0 !important;
                 width: 100% !important;
+                color: #000 !important;
             }
+            textarea { height: auto !important; min-height: 20px !important; }
+            
             .status-badge {
-                border: 1px solid #ccc !important;
-                padding: 2px 8px !important;
-                border-radius: 4px !important;
-                display: inline-block !important;
+                font-weight: 900 !important;
+                font-size: 9pt !important;
+                border: 1px solid #000 !important;
+                padding: 1px 6px !important;
+                border-radius: 2px !important;
+                text-transform: uppercase;
             }
-            .inv-count { font-weight: 900 !important; font-size: 1.2rem !important; }
+            .inv-count { font-weight: 900 !important; font-size: 11pt !important; color: #000 !important; }
+            
+            /* Entête Pro sur chaque page si possible */
+            #header-logo { color: black !important; margin-bottom: 20px; border-bottom: 2px solid black; padding-bottom: 10px; }
         }
         
-        .photo-preview { width: 60px; height: 60px; object-fit: cover; border-radius: 12px; }
+        .photo-preview { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; border: 1px solid #e2e8f0; }
         .print-only { display: none; }
     </style>
 </head>
 <body class="antialiased text-slate-900">
 
-    <div id="app-container" class="max-w-2xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative main-card">
+    <div id="app-container" class="max-w-2xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
         
         <!-- HEADER -->
         <header class="bg-slate-900 text-white p-5 sticky top-0 z-50 flex justify-between items-center no-print">
@@ -83,8 +94,9 @@
                 <span class="font-black italic uppercase text-xl tracking-tighter">APPART-ALEXIA</span>
             </div>
             <div class="flex gap-2">
-                <button onclick="finalizeAndShare()" class="p-2 bg-slate-800 rounded-xl hover:bg-slate-700" title="Finaliser et Partager"><i data-lucide="share-2" class="w-5 h-5"></i></button>
-                <button onclick="window.print()" class="p-2 bg-slate-800 rounded-xl hover:bg-slate-700" title="Imprimer"><i data-lucide="printer" class="w-5 h-5"></i></button>
+                <button onclick="finalizeAndGenerate()" class="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-transform active:scale-95" title="Générer le document">
+                    <i data-lucide="file-check" class="w-5 h-5"></i>
+                </button>
             </div>
         </header>
 
@@ -167,9 +179,9 @@
                     </button>
                     <div class="space-y-4">
                         ${edlList.map((item, index) => `
-                            <div onclick="loadEdl(${index})" class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm cursor-pointer flex justify-between items-center">
+                            <div onclick="loadEdl(${index})" class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm cursor-pointer flex justify-between items-center hover:bg-slate-50 transition-colors">
                                 <div>
-                                    <p class="font-black uppercase text-xs">${item.address || 'ADRESSE'}</p>
+                                    <p class="font-black uppercase text-xs">${item.address || 'ADRESSE NON RENSEIGNÉE'}</p>
                                     <p class="text-[10px] font-bold text-slate-400">${item.date} • ${item.tenant || 'Locataire'}</p>
                                 </div>
                                 <i data-lucide="chevron-right" class="text-slate-300"></i>
@@ -218,7 +230,7 @@
                 currentStep++;
                 render();
             } else {
-                finalizeAndShare();
+                finalizeAndGenerate();
             }
         }
 
@@ -241,14 +253,13 @@
             const nextBtnText = document.getElementById('next-btn-text');
             const nextBtnIcon = document.getElementById('next-btn-icon');
             if (currentStep === 4) {
-                nextBtnText.innerText = "Finaliser & Partager";
-                nextBtnIcon.setAttribute('data-lucide', 'share-2');
+                nextBtnText.innerText = "Générer le Document";
+                nextBtnIcon.setAttribute('data-lucide', 'file-check');
             } else {
                 nextBtnText.innerText = "Suivant";
                 nextBtnIcon.setAttribute('data-lucide', 'chevron-right');
             }
 
-            // Gestion de la visibilité des sections (DOM actif)
             for(let i=1; i<=4; i++) {
                 const stepEl = document.getElementById(`step-container-${i}`);
                 if (stepEl) {
@@ -264,17 +275,18 @@
                 <!-- ÉTAPE 1 : INFOS -->
                 <div id="step-container-1" class="space-y-6">
                     <div class="bg-white p-8 rounded-[40px] border border-slate-100 print-card">
-                        <label class="text-[10px] font-black uppercase text-slate-400 block mb-4">Adresse</label>
-                        <input type="text" oninput="currentEdl.address = this.value.toUpperCase(); saveData()" value="${currentEdl.address}" class="w-full text-2xl font-black uppercase outline-none" placeholder="...">
+                        <label class="text-[10px] font-black uppercase text-slate-400 block mb-4">Adresse du bien</label>
+                        <input type="text" oninput="currentEdl.address = this.value.toUpperCase(); saveData()" value="${currentEdl.address}" class="w-full text-2xl font-black uppercase outline-none" placeholder="EX: 12 RUE DES ALPES, PARIS">
+                        <p class="print-only text-[10px] text-slate-400 mt-2 italic">Date de l'état des lieux : ${currentEdl.date}</p>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="bg-white p-6 rounded-3xl border border-slate-100 print-card">
                             <label class="text-[9px] font-black uppercase text-slate-400 block mb-2">Propriétaire</label>
-                            <input oninput="currentEdl.owner = this.value; saveData()" value="${currentEdl.owner}" class="w-full font-bold text-sm outline-none" placeholder="Nom du propriétaire">
+                            <input oninput="currentEdl.owner = this.value; saveData()" value="${currentEdl.owner}" class="w-full font-bold text-sm outline-none" placeholder="Nom">
                         </div>
                         <div class="bg-white p-6 rounded-3xl border border-slate-100 print-card">
                             <label class="text-[9px] font-black uppercase text-slate-400 block mb-2">Locataire</label>
-                            <input oninput="currentEdl.tenant = this.value; saveData()" value="${currentEdl.tenant}" class="w-full font-bold text-sm outline-none" placeholder="Nom du locataire">
+                            <input oninput="currentEdl.tenant = this.value; saveData()" value="${currentEdl.tenant}" class="w-full font-bold text-sm outline-none" placeholder="Nom">
                         </div>
                     </div>
                 </div>
@@ -289,17 +301,17 @@
                             </div>
                             <div class="space-y-6">
                                 ${room.elements.map((el, eIdx) => `
-                                    <div class="bg-slate-50 p-6 rounded-3xl border border-transparent print:bg-white print:border-slate-100">
+                                    <div class="bg-slate-50 p-6 rounded-3xl border border-transparent print:bg-white print:border-b print:border-slate-100 print:rounded-none print:px-0">
                                         <div class="flex justify-between items-center mb-4">
                                             <input class="bg-transparent font-bold text-sm uppercase outline-none" value="${el.label}" oninput="currentEdl.rooms[${rIdx}].elements[${eIdx}].label = this.value; saveData()">
                                             <div class="flex items-center gap-2">
-                                                <span class="print-only text-[10px] uppercase font-black status-badge">${el.status}</span>
+                                                <span class="print-only status-badge">${el.status}</span>
                                                 <select onchange="currentEdl.rooms[${rIdx}].elements[${eIdx}].status = this.value; saveData()" class="text-[10px] font-black uppercase bg-white px-2 py-1 rounded-lg border outline-none cursor-pointer no-print">
                                                     ${statusOptions.map(opt => `<option value="${opt}" ${el.status === opt ? 'selected' : ''}>${opt}</option>`).join('')}
                                                 </select>
                                             </div>
                                         </div>
-                                        <textarea class="w-full bg-white border border-slate-100 p-3 rounded-xl text-xs text-slate-600 outline-none mb-4 resize-none" placeholder="Observations..." oninput="currentEdl.rooms[${rIdx}].elements[${eIdx}].comment = this.value; saveData()">${el.comment || ''}</textarea>
+                                        <textarea class="w-full bg-white border border-slate-100 p-3 rounded-xl text-xs text-slate-600 outline-none mb-4 resize-none print:p-0 print:border-none print:text-black" placeholder="Observations..." oninput="currentEdl.rooms[${rIdx}].elements[${eIdx}].comment = this.value; saveData()">${el.comment || ''}</textarea>
                                         <div class="flex gap-2 flex-wrap photo-grid">
                                             ${(el.photos || []).map((pic, pIdx) => `
                                                 <div class="relative group">
@@ -317,42 +329,44 @@
                             </div>
                         </div>
                     `).join('')}
-                    <button onclick="addRoom()" class="w-full py-6 border-4 border-dashed border-slate-200 rounded-[40px] font-black uppercase text-slate-300 no-print">+ Ajouter une pièce</button>
+                    <button onclick="addRoom()" class="w-full py-6 border-4 border-dashed border-slate-200 rounded-[40px] font-black uppercase text-slate-300 no-print hover:border-blue-200 hover:text-blue-200 transition-colors">+ Ajouter une pièce</button>
                 </div>
 
                 <!-- ÉTAPE 3 : ÉQUIPEMENTS -->
                 <div id="step-container-3" class="space-y-4 hidden">
-                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2 mb-4">Inventaire / Équipements</h3>
-                    ${currentEdl.inventory.map((item, iIdx) => `
-                        <div class="bg-white p-6 rounded-3xl border border-slate-100 flex justify-between items-center shadow-sm print-card">
-                            <input class="font-bold uppercase text-sm outline-none" value="${item.label}" oninput="currentEdl.inventory[iIdx].label = this.value; saveData()">
-                            <div class="flex items-center gap-4">
-                                <button onclick="updateInv(${iIdx}, -1)" class="w-8 h-8 rounded-full bg-slate-50 border no-print">-</button>
-                                <span class="font-black text-sm inv-count">${item.count}</span>
-                                <button onclick="updateInv(${iIdx}, 1)" class="w-8 h-8 rounded-full bg-slate-900 text-white shadow-md no-print">+</button>
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2 mb-4">Inventaire détaillé des équipements</h3>
+                    <div class="grid grid-cols-1 gap-3">
+                        ${currentEdl.inventory.map((item, iIdx) => `
+                            <div class="bg-white p-6 rounded-3xl border border-slate-100 flex justify-between items-center shadow-sm print-card print:p-2">
+                                <input class="font-bold uppercase text-sm outline-none" value="${item.label}" oninput="currentEdl.inventory[iIdx].label = this.value; saveData()">
+                                <div class="flex items-center gap-4">
+                                    <button onclick="updateInv(${iIdx}, -1)" class="w-8 h-8 rounded-full bg-slate-50 border no-print">-</button>
+                                    <span class="font-black text-sm inv-count">${item.count}</span>
+                                    <button onclick="updateInv(${iIdx}, 1)" class="w-8 h-8 rounded-full bg-slate-900 text-white shadow-md no-print">+</button>
+                                </div>
                             </div>
-                        </div>
-                    `).join('')}
+                        `).join('')}
+                    </div>
                     <button onclick="addInventoryItem()" class="w-full py-5 bg-white rounded-3xl border border-slate-100 font-black uppercase text-[10px] text-slate-400 no-print">+ Ajouter un élément</button>
                 </div>
 
                 <!-- ÉTAPE 4 : SIGNATURES -->
                 <div id="step-container-4" class="space-y-8 hidden">
                     <div class="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm print-card">
-                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Observations Générales</h3>
-                        <textarea oninput="currentEdl.generalComments = this.value; saveData()" class="w-full bg-slate-50 p-5 rounded-3xl text-sm outline-none border border-slate-100 min-h-[120px] resize-none print:bg-white" placeholder="Commentaires de fin...">${currentEdl.generalComments || ''}</textarea>
+                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Observations Finales & Remarques</h3>
+                        <textarea oninput="currentEdl.generalComments = this.value; saveData()" class="w-full bg-slate-50 p-5 rounded-3xl text-sm outline-none border border-slate-100 min-h-[120px] resize-none print:bg-white print:p-0 print:text-black" placeholder="Indiquez ici d'éventuels commentaires globaux...">${currentEdl.generalComments || ''}</textarea>
                     </div>
 
                     <div class="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm print-card">
-                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-6">Signatures</h3>
+                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-6">Validation et Signatures</h3>
                         <div class="grid grid-cols-2 gap-8">
                             ${['owner', 'tenant'].map(id => `
                                 <div>
                                     <div class="flex justify-between mb-2">
-                                        <span class="text-[9px] font-black uppercase text-slate-400">${id === 'owner' ? 'Propriétaire' : 'Locataire'}</span>
+                                        <span class="text-[9px] font-black uppercase text-slate-400">${id === 'owner' ? 'Signature Propriétaire' : 'Signature Locataire'}</span>
                                         <button onclick="clearSign('${id}')" class="text-[9px] font-bold text-red-500 uppercase no-print">Effacer</button>
                                     </div>
-                                    <div class="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl h-44 relative overflow-hidden print:border-solid print:border-slate-100">
+                                    <div class="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl h-44 relative overflow-hidden print:border-solid print:border-slate-300 print:bg-white">
                                         <canvas id="sign-${id}" class="signature-canvas w-full h-full no-print"></canvas>
                                         <img id="img-${id}" src="${currentEdl.signatures[id] || ''}" class="absolute inset-0 w-full h-full object-contain pointer-events-none ${currentEdl.signatures[id] ? '' : 'hidden'}">
                                     </div>
@@ -360,6 +374,7 @@
                             `).join('')}
                         </div>
                     </div>
+                    <p class="text-[8px] text-center text-slate-300 uppercase font-bold tracking-[0.3em] mt-10 print-only">Document généré via APPART-ALEXIA Pro Edition</p>
                 </div>
             `;
             updateStepUI();
@@ -399,37 +414,23 @@
         }
 
         function addInventoryItem() {
-            currentEdl.inventory.push({ label: "Objet", count: 0 });
+            currentEdl.inventory.push({ label: "Nouvel objet", count: 0 });
             saveData(); render();
         }
 
         function clearSign(id) { currentEdl.signatures[id] = null; saveData(); render(); }
 
-        // Nouvelle fonction consolidée pour générer et partager
-        async function finalizeAndShare() {
+        /**
+         * Optimisation Pro : Déclenche l'impression (PDF)
+         * Le CSS s'occupe de rendre le document complet et propre.
+         */
+        function finalizeAndGenerate() {
             if (!currentEdl) return;
             saveData();
-            
-            // On s'assure que le contenu est à jour
-            render();
-
-            const message = `Bonjour,\n\nVoici l'État des Lieux pour le logement au ${currentEdl.address}.\n\nLocataire: ${currentEdl.tenant}\nDate: ${currentEdl.date}`;
-            
-            if (navigator.share) {
-                try {
-                    await navigator.share({ 
-                        title: `EDL APPART-ALEXIA - ${currentEdl.address}`, 
-                        text: message, 
-                        url: window.location.href 
-                    });
-                } catch (err) { 
-                    // Si le partage échoue ou est annulé, on propose l'impression (PDF)
-                    window.print(); 
-                }
-            } else { 
-                // Fallback direct sur l'impression si le partage n'est pas supporté
-                window.print(); 
-            }
+            // On s'assure que tout est rendu avant l'impression
+            render(); 
+            // Appel de l'impression système (qui permet de sauvegarder en PDF)
+            window.print();
         }
 
         function initSignPad(id) {
@@ -446,7 +447,7 @@
                 return { x: cx - rect.left, y: cy - rect.top };
             };
 
-            const start = (e) => { isDrawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; };
+            const start = (e) => { isDrawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.strokeStyle = '#000000'; ctx.lineWidth = 2; };
             const move = (e) => { if (!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
             const stop = () => { if (!isDrawing) return; isDrawing = false; currentEdl.signatures[id] = canvas.toDataURL(); const img = document.getElementById(`img-${id}`); img.src = currentEdl.signatures[id]; img.classList.remove('hidden'); saveData(); };
 
