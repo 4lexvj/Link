@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Appart-Alex's | Gestion Multi-EDL</title>
+    <title>Appart-Alex | Gestion Multi-EDL</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -26,9 +26,9 @@
 
         .status-pulse { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
         .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
-        .offline { background-color: #94a3b8; }
+        .offline { background-color: #ef4444; }
         .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
-        .pending { background-color: #f59e0b; } /* Orange pour modifications en cours */
+        .pending { background-color: #f59e0b; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -51,18 +51,22 @@
         
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'appart-alex';
 
+        let app, auth, db;
         try {
-            const app = initializeApp(firebaseConfig);
-            const auth = getAuth(app);
-            const db = getFirestore(app);
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (e) {
+            console.error("Firebase Init Error", e);
+        }
 
-            window.FB_BRIDGE = {
-                auth, db, appId,
-                doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc,
-                signInAnonymously, onAuthStateChanged
-            };
-        } catch (e) { console.error("Firebase Init Fail", e); }
-        window.dispatchEvent(new Event('fb-check'));
+        window.FB_BRIDGE = {
+            auth, db, appId,
+            doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc,
+            signInAnonymously, onAuthStateChanged
+        };
+        
+        window.dispatchEvent(new Event('fb-ready'));
     </script>
 
     <script type="text/babel">
@@ -117,16 +121,15 @@
         };
 
         function App() {
-            const [view, setView] = useState('list'); // 'list' or 'editor'
+            const [view, setView] = useState('list');
             const [isInitialized, setIsInitialized] = useState(false);
             const [user, setUser] = useState(null);
             const [edlList, setEdlList] = useState([]);
             const [currentEdlId, setCurrentEdlId] = useState(null);
             const [step, setStep] = useState(1);
-            const [syncStatus, setSyncStatus] = useState('offline'); // 'offline', 'online', 'syncing', 'pending'
+            const [syncStatus, setSyncStatus] = useState('offline');
             const fileInputRef = useRef(null);
             const [activeElement, setActiveElement] = useState(null);
-            
             const [formData, setFormData] = useState(null);
 
             const defaultData = () => ({
@@ -137,65 +140,133 @@
                 signatures: { owner: null, tenant: null }
             });
 
+            // Initialisation Auth & Firebase
             useEffect(() => {
-                const attemptAuth = async () => {
-                    if (!window.FB_BRIDGE) {
-                        setTimeout(() => setIsInitialized(true), 2000);
-                        return;
-                    }
+                const init = async () => {
+                    if (!window.FB_BRIDGE) return;
                     const b = window.FB_BRIDGE;
-                    try { await b.signInAnonymously(b.auth); } catch (e) {}
-                    b.onAuthStateChanged(b.auth, (u) => {
-                        setUser(u);
-                        setSyncStatus(u ? 'online' : 'offline');
+                    
+                    try {
+                        // Tentative de connexion anonyme
+                        // Si le projet Firebase interdit les connexions anonymes, on passe en mode dégradé
+                        let userCred;
+                        try {
+                            userCred = await b.signInAnonymously(b.auth);
+                            setUser(userCred.user);
+                            setSyncStatus('online');
+                        } catch (authErr) {
+                            console.warn("Connexion anonyme restreinte. Mode local activé.", authErr);
+                            setSyncStatus('offline');
+                            // On génère un UID temporaire pour le fonctionnement local
+                            setUser({ uid: 'local_user_' + Math.random().toString(36).substr(2, 9) });
+                        }
+
                         setIsInitialized(true);
-                    });
+
+                        // Chargement via URL si présent
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const shareId = urlParams.get('id');
+                        if (shareId && b.db) {
+                            try {
+                                const docRef = b.doc(b.db, 'artifacts', b.appId, 'public', 'data', 'edl', shareId);
+                                const snap = await b.getDoc(docRef);
+                                if (snap.exists()) {
+                                    setFormData(snap.data());
+                                    setCurrentEdlId(shareId);
+                                    setView('editor');
+                                }
+                            } catch (e) { console.error("Load shared doc error", e); }
+                        }
+                    } catch (e) {
+                        console.error("Critical Init Error", e);
+                        setIsInitialized(true);
+                    }
+
+                    if (b.auth) {
+                        b.onAuthStateChanged(b.auth, (u) => {
+                            if (u) {
+                                setUser(u);
+                                setSyncStatus('online');
+                            }
+                        });
+                    }
                 };
-                window.addEventListener('fb-check', attemptAuth);
-                if (window.FB_BRIDGE) attemptAuth();
+
+                window.addEventListener('fb-ready', init);
+                if (window.FB_BRIDGE) init();
+                return () => window.removeEventListener('fb-ready', init);
             }, []);
 
-            // Liste des EDL
+            // Liste des EDL (Cloud si dispo, sinon vide)
             useEffect(() => {
-                if (!user || !window.FB_BRIDGE) return;
+                if (!user || !window.FB_BRIDGE || !window.FB_BRIDGE.db || user.uid.startsWith('local')) return;
                 const b = window.FB_BRIDGE;
-                const q = b.collection(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl');
-                const unsub = b.onSnapshot(q, (snapshot) => {
-                    const list = [];
-                    snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-                    setEdlList(list);
-                }, (err) => console.error(err));
-                return () => unsub();
+                try {
+                    const q = b.collection(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl');
+                    const unsub = b.onSnapshot(q, (snapshot) => {
+                        const list = [];
+                        snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+                        setEdlList(list);
+                    }, (err) => {
+                        console.error("Snapshot error (check security rules):", err);
+                    });
+                    return () => unsub();
+                } catch (e) { console.error("Sync list error", e); }
             }, [user]);
 
-            // Détection de changements pour l'indicateur orange
+            // Sauvegarde Cloud avec Fallback
             useEffect(() => {
-                if (formData && syncStatus === 'online') {
-                    setSyncStatus('pending');
-                }
-            }, [formData]);
-
-            // Sauvegarde Cloud Automatique (Debounce)
-            useEffect(() => {
-                if (!user || !window.FB_BRIDGE || !formData || !currentEdlId) return;
+                if (!user || !window.FB_BRIDGE || !window.FB_BRIDGE.db || !formData || !currentEdlId || user.uid.startsWith('local')) return;
                 const b = window.FB_BRIDGE;
                 
                 const timer = setTimeout(async () => {
                     setSyncStatus('syncing');
                     try {
-                        const docRef = b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', currentEdlId);
-                        await b.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
+                        const dataToSave = { ...formData, lastUpdated: new Date().toISOString() };
+                        
+                        const privateRef = b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', currentEdlId);
+                        await b.setDoc(privateRef, dataToSave, { merge: true });
+                        
+                        const publicRef = b.doc(b.db, 'artifacts', b.appId, 'public', 'data', 'edl', currentEdlId);
+                        await b.setDoc(publicRef, dataToSave, { merge: true });
+                        
                         setSyncStatus('online');
                     } catch (e) { 
+                        console.error("Sync Save Error", e);
                         setSyncStatus('offline'); 
                     }
-                }, 1500);
+                }, 2000);
 
                 return () => clearTimeout(timer);
             }, [formData, user, currentEdlId]);
 
+            const handleShare = async () => {
+                const shareUrl = window.location.origin + window.location.pathname + "?id=" + currentEdlId;
+                const shareData = {
+                    title: 'Appart-Alex | État des lieux',
+                    text: `Voici l'état des lieux pour ${formData.address || 'le logement'}.`,
+                    url: shareUrl
+                };
+
+                try {
+                    if (navigator.share) {
+                        await navigator.share(shareData);
+                    } else {
+                        const dummy = document.createElement("input");
+                        document.body.appendChild(dummy);
+                        dummy.value = shareUrl;
+                        dummy.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(dummy);
+                        alert("Lien de partage copié dans le presse-papier !");
+                    }
+                } catch (err) {
+                    console.log('Erreur de partage:', err);
+                }
+            };
+
             const createNewEdl = () => {
-                const newId = "edl_" + Date.now();
+                const newId = "edl_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
                 setFormData(defaultData());
                 setCurrentEdlId(newId);
                 setStep(1);
@@ -215,9 +286,15 @@
             const deleteEdl = async (e, id) => {
                 e.stopPropagation();
                 if (!confirm("Supprimer cet état des lieux ?")) return;
-                if (!window.FB_BRIDGE || !user) return;
+                if (!window.FB_BRIDGE || !user || user.uid.startsWith('local')) {
+                    setEdlList(prev => prev.filter(item => item.id !== id));
+                    return;
+                }
                 const b = window.FB_BRIDGE;
-                await b.deleteDoc(b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', id));
+                try {
+                    await b.deleteDoc(b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', id));
+                    await b.deleteDoc(b.doc(b.db, 'artifacts', b.appId, 'public', 'data', 'edl', id));
+                } catch (e) { console.error("Delete error", e); }
             };
 
             const triggerPhoto = (roomId, elId) => {
@@ -243,49 +320,29 @@
                 reader.readAsDataURL(file);
             };
 
-            const copyShareLink = () => {
-                const url = window.location.href + "?id=" + currentEdlId;
-                const dummy = document.createElement("input");
-                document.body.appendChild(dummy);
-                dummy.value = url;
-                dummy.select();
-                document.execCommand("copy");
-                document.body.removeChild(dummy);
-                alert("Lien de partage copié !");
-            };
-
             const getSyncLabel = () => {
+                if (user?.uid?.startsWith('local')) return 'Mode Local (Cloud désactivé)';
                 switch(syncStatus) {
                     case 'syncing': return 'Enregistrement...';
-                    case 'pending': return 'Modifié (attente)';
-                    case 'online': return 'Tout est enregistré';
-                    case 'offline': return 'Mode déconnecté';
+                    case 'pending': return 'Modifié localement';
+                    case 'online': return 'Enregistré sur le cloud';
+                    case 'offline': return 'Erreur Cloud / Accès restreint';
                     default: return 'Prêt';
-                }
-            };
-
-            const getSyncColor = () => {
-                switch(syncStatus) {
-                    case 'syncing': return 'syncing';
-                    case 'pending': return 'pending';
-                    case 'online': return 'online';
-                    default: return 'offline';
                 }
             };
 
             if (!isInitialized) return (
                 <div className="h-screen flex flex-col items-center justify-center bg-white">
                     <div className="text-4xl font-black italic tracking-tighter mb-4 text-slate-900">Appart-Alex</div>
-                    <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 loader-dots">Connexion au Cloud</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 loader-dots">Initialisation sécurisée</div>
                 </div>
             );
 
-            // Vue Liste / Dashboard
             if (view === 'list') return (
                 <div className="max-w-xl mx-auto p-6 min-h-screen">
                     <div className="flex justify-between items-center mb-10">
                         <h1 className="text-3xl font-black italic tracking-tighter text-slate-900 uppercase">Appart-Alex</h1>
-                        <div className={`status-pulse ${syncStatus === 'online' ? 'online' : 'offline'}`}></div>
+                        <div className={`status-pulse ${syncStatus === 'online' ? 'online' : (user?.uid?.startsWith('local') ? 'pending' : 'offline')}`}></div>
                     </div>
                     
                     <button onClick={createNewEdl} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black uppercase text-sm shadow-xl shadow-blue-200 active:scale-95 transition-all mb-8">
@@ -293,14 +350,14 @@
                     </button>
 
                     <div className="space-y-4">
-                        <h2 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">Vos Documents</h2>
+                        <h2 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">Documents</h2>
                         {edlList.length === 0 ? (
-                            <div className="p-10 border-2 border-dashed rounded-3xl text-center text-slate-300 font-bold">Aucun document sauvegardé</div>
+                            <div className="p-10 border-2 border-dashed rounded-3xl text-center text-slate-300 font-bold italic">Aucun document sur le cloud</div>
                         ) : (
                             edlList.map(item => (
                                 <div key={item.id} onClick={() => openEdl(item.id)} className="p-5 bg-white rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center group cursor-pointer hover:border-blue-200 transition-all">
                                     <div className="flex-1">
-                                        <p className="font-bold text-slate-800">{item.address || "Adresse non renseignée"}</p>
+                                        <p className="font-bold text-slate-800">{item.address || "Nouvel EDL"}</p>
                                         <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{item.date} • {item.tenant || 'Sans locataire'}</p>
                                     </div>
                                     <button onClick={(e) => deleteEdl(e, item.id)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -313,26 +370,25 @@
                 </div>
             );
 
-            // Vue Éditeur
             return (
                 <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
                     <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
                     
                     <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                            <button onClick={() => setView('list')} className="p-2 hover:bg-slate-800 rounded-lg">
+                            <button onClick={() => { window.history.pushState({}, '', window.location.pathname); setView('list'); }} className="p-2 hover:bg-slate-800 rounded-lg">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
                             </button>
                             <div>
                                 <span className="text-xl font-black italic tracking-tighter uppercase leading-none block">Appart-Alex</span>
                                 <div className="flex items-center mt-1">
-                                    <span className={`status-pulse ${getSyncColor()}`}></span>
+                                    <span className={`status-pulse ${syncStatus === 'syncing' ? 'syncing' : (syncStatus === 'pending' || user?.uid?.startsWith('local') ? 'pending' : (syncStatus === 'online' ? 'online' : 'offline'))}`}></span>
                                     <span className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">{getSyncLabel()}</span>
                                 </div>
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={copyShareLink} title="Partager" className="p-2 bg-slate-800 rounded-lg hover:bg-blue-600 transition-colors">
+                            <button onClick={handleShare} title="Partager" className="p-2 bg-slate-800 rounded-lg hover:bg-blue-600 transition-colors">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
                             </button>
                             <button onClick={() => window.print()} className="p-2 bg-blue-600 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></button>
