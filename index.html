@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Appart-Alex's | État des Lieux</title>
+    <title>Appart-Alex's | Gestion Multi-EDL</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -21,23 +21,14 @@
         body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
         .signature-pad { border: 2px dashed #cbd5e1; background: #fff; touch-action: none; cursor: crosshair; }
         
-        .loader-dots:after {
-            content: '.';
-            animation: dots 1.5s steps(5, end) infinite;
-        }
-        @keyframes dots {
-            0%, 20% { content: '.'; }
-            40% { content: '..'; }
-            60% { content: '...'; }
-            80%, 100% { content: ''; }
-        }
+        .loader-dots:after { content: '.'; animation: dots 1.5s steps(5, end) infinite; }
+        @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 80%, 100% { content: ''; } }
 
-        .status-pulse {
-            width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;
-        }
+        .status-pulse { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
         .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
         .offline { background-color: #94a3b8; }
         .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
+        .pending { background-color: #f59e0b; } /* Orange pour modifications en cours */
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -47,9 +38,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // VOS PARAMÈTRES RÉELS
         const firebaseConfig = {
             apiKey: "AIzaSyDFm8IK-Wl0T4U5n8SNkXs6aE6ePU807_c",
             authDomain: "link-immo-drumet.firebaseapp.com",
@@ -68,12 +58,10 @@
 
             window.FB_BRIDGE = {
                 auth, db, appId,
-                doc, setDoc, collection, onSnapshot,
+                doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc,
                 signInAnonymously, onAuthStateChanged
             };
-        } catch (e) {
-            console.error("Firebase Init Fail", e);
-        }
+        } catch (e) { console.error("Firebase Init Fail", e); }
         window.dispatchEvent(new Event('fb-check'));
     </script>
 
@@ -129,14 +117,19 @@
         };
 
         function App() {
+            const [view, setView] = useState('list'); // 'list' or 'editor'
             const [isInitialized, setIsInitialized] = useState(false);
             const [user, setUser] = useState(null);
+            const [edlList, setEdlList] = useState([]);
+            const [currentEdlId, setCurrentEdlId] = useState(null);
             const [step, setStep] = useState(1);
-            const [syncStatus, setSyncStatus] = useState('offline');
+            const [syncStatus, setSyncStatus] = useState('offline'); // 'offline', 'online', 'syncing', 'pending'
             const fileInputRef = useRef(null);
             const [activeElement, setActiveElement] = useState(null);
             
-            const [formData, setFormData] = useState({
+            const [formData, setFormData] = useState(null);
+
+            const defaultData = () => ({
                 address: "",
                 date: new Date().toLocaleDateString('fr-FR'),
                 owner: "", tenant: "",
@@ -147,46 +140,85 @@
             useEffect(() => {
                 const attemptAuth = async () => {
                     if (!window.FB_BRIDGE) {
-                        setTimeout(() => setIsInitialized(true), 1500);
+                        setTimeout(() => setIsInitialized(true), 2000);
                         return;
                     }
-
                     const b = window.FB_BRIDGE;
-                    try {
-                        await b.signInAnonymously(b.auth);
-                    } catch (e) {
-                        console.warn("Auth failed");
-                    }
-
+                    try { await b.signInAnonymously(b.auth); } catch (e) {}
                     b.onAuthStateChanged(b.auth, (u) => {
                         setUser(u);
                         setSyncStatus(u ? 'online' : 'offline');
                         setIsInitialized(true);
                     });
                 };
-
                 window.addEventListener('fb-check', attemptAuth);
                 if (window.FB_BRIDGE) attemptAuth();
-                
-                // Sécurité : affichage forcé au bout de 2s max
-                const timer = setTimeout(() => setIsInitialized(true), 2000);
-                return () => clearTimeout(timer);
             }, []);
 
-            // Sauvegarde Cloud (si user connecté)
+            // Liste des EDL
             useEffect(() => {
                 if (!user || !window.FB_BRIDGE) return;
                 const b = window.FB_BRIDGE;
+                const q = b.collection(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl');
+                const unsub = b.onSnapshot(q, (snapshot) => {
+                    const list = [];
+                    snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+                    setEdlList(list);
+                }, (err) => console.error(err));
+                return () => unsub();
+            }, [user]);
+
+            // Détection de changements pour l'indicateur orange
+            useEffect(() => {
+                if (formData && syncStatus === 'online') {
+                    setSyncStatus('pending');
+                }
+            }, [formData]);
+
+            // Sauvegarde Cloud Automatique (Debounce)
+            useEffect(() => {
+                if (!user || !window.FB_BRIDGE || !formData || !currentEdlId) return;
+                const b = window.FB_BRIDGE;
+                
                 const timer = setTimeout(async () => {
                     setSyncStatus('syncing');
                     try {
-                        const docRef = b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', 'current');
+                        const docRef = b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', currentEdlId);
                         await b.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
                         setSyncStatus('online');
-                    } catch (e) { setSyncStatus('offline'); }
-                }, 2000);
+                    } catch (e) { 
+                        setSyncStatus('offline'); 
+                    }
+                }, 1500);
+
                 return () => clearTimeout(timer);
-            }, [formData, user]);
+            }, [formData, user, currentEdlId]);
+
+            const createNewEdl = () => {
+                const newId = "edl_" + Date.now();
+                setFormData(defaultData());
+                setCurrentEdlId(newId);
+                setStep(1);
+                setView('editor');
+            };
+
+            const openEdl = (id) => {
+                const edl = edlList.find(e => e.id === id);
+                if (edl) {
+                    setFormData(edl);
+                    setCurrentEdlId(id);
+                    setStep(1);
+                    setView('editor');
+                }
+            };
+
+            const deleteEdl = async (e, id) => {
+                e.stopPropagation();
+                if (!confirm("Supprimer cet état des lieux ?")) return;
+                if (!window.FB_BRIDGE || !user) return;
+                const b = window.FB_BRIDGE;
+                await b.deleteDoc(b.doc(b.db, 'artifacts', b.appId, 'users', user.uid, 'edl', id));
+            };
 
             const triggerPhoto = (roomId, elId) => {
                 setActiveElement({ roomId, elId });
@@ -211,6 +243,36 @@
                 reader.readAsDataURL(file);
             };
 
+            const copyShareLink = () => {
+                const url = window.location.href + "?id=" + currentEdlId;
+                const dummy = document.createElement("input");
+                document.body.appendChild(dummy);
+                dummy.value = url;
+                dummy.select();
+                document.execCommand("copy");
+                document.body.removeChild(dummy);
+                alert("Lien de partage copié !");
+            };
+
+            const getSyncLabel = () => {
+                switch(syncStatus) {
+                    case 'syncing': return 'Enregistrement...';
+                    case 'pending': return 'Modifié (attente)';
+                    case 'online': return 'Tout est enregistré';
+                    case 'offline': return 'Mode déconnecté';
+                    default: return 'Prêt';
+                }
+            };
+
+            const getSyncColor = () => {
+                switch(syncStatus) {
+                    case 'syncing': return 'syncing';
+                    case 'pending': return 'pending';
+                    case 'online': return 'online';
+                    default: return 'offline';
+                }
+            };
+
             if (!isInitialized) return (
                 <div className="h-screen flex flex-col items-center justify-center bg-white">
                     <div className="text-4xl font-black italic tracking-tighter mb-4 text-slate-900">Appart-Alex</div>
@@ -218,19 +280,63 @@
                 </div>
             );
 
+            // Vue Liste / Dashboard
+            if (view === 'list') return (
+                <div className="max-w-xl mx-auto p-6 min-h-screen">
+                    <div className="flex justify-between items-center mb-10">
+                        <h1 className="text-3xl font-black italic tracking-tighter text-slate-900 uppercase">Appart-Alex</h1>
+                        <div className={`status-pulse ${syncStatus === 'online' ? 'online' : 'offline'}`}></div>
+                    </div>
+                    
+                    <button onClick={createNewEdl} className="w-full py-6 bg-blue-600 text-white rounded-3xl font-black uppercase text-sm shadow-xl shadow-blue-200 active:scale-95 transition-all mb-8">
+                        + Nouvel État des Lieux
+                    </button>
+
+                    <div className="space-y-4">
+                        <h2 className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">Vos Documents</h2>
+                        {edlList.length === 0 ? (
+                            <div className="p-10 border-2 border-dashed rounded-3xl text-center text-slate-300 font-bold">Aucun document sauvegardé</div>
+                        ) : (
+                            edlList.map(item => (
+                                <div key={item.id} onClick={() => openEdl(item.id)} className="p-5 bg-white rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center group cursor-pointer hover:border-blue-200 transition-all">
+                                    <div className="flex-1">
+                                        <p className="font-bold text-slate-800">{item.address || "Adresse non renseignée"}</p>
+                                        <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{item.date} • {item.tenant || 'Sans locataire'}</p>
+                                    </div>
+                                    <button onClick={(e) => deleteEdl(e, item.id)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+
+            // Vue Éditeur
             return (
                 <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
                     <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
                     
                     <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
-                        <div>
-                            <span className="text-xl font-black italic tracking-tighter uppercase">Appart-Alex</span>
-                            <div className="flex items-center">
-                                <span className={`status-pulse ${syncStatus === 'online' ? 'online' : (syncStatus === 'syncing' ? 'syncing' : 'offline')}`}></span>
-                                <span className="text-[9px] font-bold uppercase text-slate-500">{syncStatus === 'syncing' ? 'Synchronisation...' : (user ? 'Cloud Actif' : 'Mode Local')}</span>
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => setView('list')} className="p-2 hover:bg-slate-800 rounded-lg">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                            </button>
+                            <div>
+                                <span className="text-xl font-black italic tracking-tighter uppercase leading-none block">Appart-Alex</span>
+                                <div className="flex items-center mt-1">
+                                    <span className={`status-pulse ${getSyncColor()}`}></span>
+                                    <span className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">{getSyncLabel()}</span>
+                                </div>
                             </div>
                         </div>
-                        <button onClick={() => window.print()} className="p-2 bg-blue-600 rounded-lg shadow-lg active:scale-95 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></button>
+                        <div className="flex gap-2">
+                            <button onClick={copyShareLink} title="Partager" className="p-2 bg-slate-800 rounded-lg hover:bg-blue-600 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                            </button>
+                            <button onClick={() => window.print()} className="p-2 bg-blue-600 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></button>
+                        </div>
                     </header>
 
                     <nav className="no-print flex border-b bg-white">
@@ -251,11 +357,11 @@
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
                                         <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Bailleur</label>
-                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} placeholder="Nom..." />
+                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} />
                                     </div>
                                     <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
                                         <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Locataire</label>
-                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} placeholder="Nom..." />
+                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} />
                                     </div>
                                 </div>
                             </div>
@@ -276,13 +382,13 @@
                                                         </select>
                                                     </div>
                                                     <div className="flex gap-2 overflow-x-auto no-print mb-2 pb-1">
-                                                        <button onClick={() => triggerPhoto(room.id, el.id)} className="w-12 h-12 shrink-0 bg-slate-50 rounded-lg flex items-center justify-center text-slate-300 border-2 border-dashed border-slate-200 hover:border-blue-300 hover:text-blue-300 transition-colors">+</button>
+                                                        <button onClick={() => triggerPhoto(room.id, el.id)} className="w-12 h-12 shrink-0 bg-slate-50 rounded-lg flex items-center justify-center text-slate-300 border-2 border-dashed border-slate-200 hover:border-blue-300 transition-colors">+</button>
                                                         {el.photos?.map((p, idx) => <img key={idx} src={p} className="w-12 h-12 object-cover rounded-lg border shadow-sm" />)}
                                                     </div>
                                                     <textarea className="w-full text-xs text-slate-400 bg-transparent outline-none resize-none" placeholder="Observations..." rows="1" value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
                                                 </div>
                                             ))}
-                                            <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Élément', status: 'Bon', comment: '', photos: []}]} : r)})} className="no-print text-[9px] font-bold uppercase text-blue-600 hover:underline">+ Ajouter Élément</button>
+                                            <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Élément', status: 'Bon', comment: '', photos: []}]} : r)})} className="no-print text-[9px] font-bold uppercase text-blue-600">+ Ajouter Élément</button>
                                         </div>
                                     </div>
                                 ))}
@@ -292,13 +398,8 @@
 
                         {step === 3 && (
                             <div className="space-y-8">
-                                <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-[10px] text-blue-700 font-medium">
-                                    Les signatures ci-dessous valident l'état du logement à la date du {formData.date}.
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <SignaturePad label="Propriétaire / Bailleur" savedImage={formData.signatures.owner} onSave={img => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
-                                    <SignaturePad label="Locataire" savedImage={formData.signatures.tenant} onSave={img => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
-                                </div>
+                                <SignaturePad label="Propriétaire / Bailleur" savedImage={formData.signatures.owner} onSave={img => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
+                                <SignaturePad label="Locataire" savedImage={formData.signatures.tenant} onSave={img => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
                             </div>
                         )}
 
@@ -310,44 +411,31 @@
                             </div>
                             <div className="grid grid-cols-2 gap-4 mb-8">
                                 <div className="p-4 bg-slate-100 rounded-lg">
-                                    <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">Bien</p>
                                     <p className="font-bold">{formData.address || 'Non spécifié'}</p>
                                     <p className="text-[10px] mt-2">Date : {formData.date}</p>
                                 </div>
-                                <div className="space-y-2">
-                                    <p className="text-sm"><b>Bailleur :</b> {formData.owner}</p>
-                                    <p className="text-sm"><b>Locataire :</b> {formData.tenant}</p>
+                                <div className="space-y-2 text-sm">
+                                    <p><b>Bailleur :</b> {formData.owner}</p>
+                                    <p><b>Locataire :</b> {formData.tenant}</p>
                                 </div>
                             </div>
                             {formData.rooms.map(r => (
                                 <div key={r.id} className="room-section mb-6">
                                     <h2 className="text-xl font-bold uppercase border-b-2 border-black mb-4">{r.name}</h2>
                                     {r.elements.map(el => (
-                                        <div key={el.id} className="mb-4 break-inside-avoid border-b border-slate-100 pb-2">
-                                            <div className="flex justify-between font-bold text-sm mb-1"><span>{el.label}</span><span className="bg-slate-100 px-2 rounded">[{el.status}]</span></div>
-                                            <p className="text-xs italic text-slate-600 mb-2">{el.comment || "Pas d'observations."}</p>
-                                            <div className="flex gap-2 mt-2 flex-wrap">
-                                                {el.photos?.map((p, i) => <img key={i} src={p} className="h-24 w-24 object-cover border-2 border-slate-200 rounded" />)}
-                                            </div>
+                                        <div key={el.id} className="mb-4 break-inside-avoid border-b border-slate-100 pb-2 text-sm">
+                                            <div className="flex justify-between font-bold mb-1"><span>{el.label}</span><span>[{el.status}]</span></div>
+                                            <p className="italic text-slate-600 mb-2">{el.comment}</p>
+                                            <div className="flex gap-2 flex-wrap">{el.photos?.map((p, i) => <img key={i} src={p} className="h-24 w-24 object-cover border" />)}</div>
                                         </div>
                                     ))}
                                 </div>
                             ))}
-                            <div className="mt-12 grid grid-cols-2 gap-8">
-                                <div className="text-center">
-                                    <p className="text-[10px] font-bold uppercase mb-2">Signature Bailleur</p>
-                                    <div className="border-2 border-black h-32 rounded-lg">{formData.signatures.owner && <img src={formData.signatures.owner} className="h-full w-full object-contain" />}</div>
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-[10px] font-bold uppercase mb-2">Signature Locataire</p>
-                                    <div className="border-2 border-black h-32 rounded-lg">{formData.signatures.tenant && <img src={formData.signatures.tenant} className="h-full w-full object-contain" />}</div>
-                                </div>
-                            </div>
                         </div>
                     </main>
 
                     <footer className="no-print p-6 border-t bg-slate-50 flex gap-4 sticky bottom-0 z-40">
-                        {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-4 bg-white border border-slate-200 font-bold rounded-2xl text-slate-500 shadow-sm active:scale-95 transition-all">Retour</button>}
+                        {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-4 bg-white border border-slate-200 font-bold rounded-2xl text-slate-500 active:scale-95 transition-all">Retour</button>}
                         <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all">
                             {step < 3 ? 'Suivant' : 'Terminer & PDF'}
                         </button>
