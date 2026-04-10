@@ -3,433 +3,429 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Immo-Alex's Elite Edition</title>
-    
+    <title>Immo-Alex | Cloud & PDF</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; margin: 0; padding: 0; }
+            .room-section { break-inside: avoid; border-left: 2px solid #000 !important; margin-bottom: 20px; padding-left: 15px; }
+            .signature-container { break-inside: avoid; margin-top: 30px; }
+            .max-w-3xl { max-width: 100% !important; width: 100% !important; box-shadow: none !important; }
+        }
         
-        let firebaseConfig;
-        try {
-            firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : {
-                apiKey: "AIzaSyDFm8IK-Wl0T4U5n8SNKxs6aE6ePU807_c",
-                authDomain: "link-immo-drumet.firebaseapp.com",
-                projectId: "link-immo-drumet",
-                storageBucket: "link-immo-drumet.firebasestorage.app",
-                messagingSenderId: "817653872182",
-                appId: "1:817653872182:web:9c897b78732397464f8a97"
-            };
-        } catch (e) { console.error(e); }
+        body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+        .signature-pad { border: 2px dashed #cbd5e1; background: #fff; touch-action: none; cursor: crosshair; }
+        
+        .status-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .online { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
+        .offline { background-color: #ef4444; }
+        .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .photo-strip::-webkit-scrollbar { height: 4px; }
+        .photo-strip::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Configuration Firebase (injectée ou par défaut pour le test)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "", authDomain: "", projectId: "placeholder-id", storageBucket: "", messagingSenderId: "", appId: ""
+        };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-default';
+        const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = window.__app_id || "immo-alex-elite";
 
-        window.FB_SERVICES = { auth, db, appId, signInAnonymously, signInWithCustomToken, onAuthStateChanged, collection, onSnapshot, doc, setDoc, addDoc, getDoc, serverTimestamp };
+        // Bridge pour React
+        window.FirebaseBridge = {
+            auth, db, appId, initialToken,
+            doc, setDoc, collection, onSnapshot, query,
+            signInWithCustomToken, signInAnonymously, onAuthStateChanged
+        };
+        window.dispatchEvent(new Event('firebase-bridge-ready'));
     </script>
-
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; }
-            #print-zone { display: block !important; }
-        }
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        .animate-slide-up { animation: slideUp 0.3s ease-out; }
-    </style>
-</head>
-<body class="bg-[#FDFDFD] text-slate-900">
-    <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- COMPOSANTS ---
         const SignaturePad = ({ label, onSave, savedImage }) => {
             const canvasRef = useRef(null);
-            const [drawing, setDrawing] = useState(false);
-            useEffect(() => {
-                if (savedImage || !canvasRef.current) return;
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext('2d');
-                ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
-                const getPos = (e) => {
-                    const r = canvas.getBoundingClientRect();
-                    const t = e.touches ? e.touches[0] : e;
-                    return { x: t.clientX - r.left, y: t.clientY - r.top };
-                };
-                canvas.onmousedown = canvas.ontouchstart = (e) => { setDrawing(true); ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); };
-                canvas.onmousemove = canvas.ontouchmove = (e) => { if (!drawing) return; e.preventDefault(); const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
-                window.onmouseup = window.ontouchend = () => setDrawing(false);
-            }, [drawing, savedImage]);
+            const [isDrawing, setIsDrawing] = useState(false);
+
+            const getPos = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            };
+
+            const start = (e) => {
+                const pos = getPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0f172a';
+                ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
+                setIsDrawing(true);
+            };
+
+            const move = (e) => {
+                if (!isDrawing) return;
+                const pos = getPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.lineTo(pos.x, pos.y); ctx.stroke();
+            };
+
+            const stop = () => {
+                if (!isDrawing) return;
+                setIsDrawing(false);
+                onSave(canvasRef.current.toDataURL());
+            };
+
+            const clear = () => {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                onSave(null);
+            };
 
             return (
-                <div className="space-y-3">
-                    <div className="flex justify-between items-center px-1">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
-                        {savedImage && <button onClick={() => onSave(null)} className="text-rose-500 text-[10px] font-bold">EFFACER</button>}
+                <div className="mb-4 signature-container">
+                    <div className="flex justify-between items-center mb-2">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">{label}</label>
+                        <button onClick={clear} className="no-print text-[10px] text-red-500 font-bold uppercase">Effacer</button>
                     </div>
-                    <div className="h-44 bg-white rounded-[2rem] border border-slate-100 relative overflow-hidden shadow-sm">
-                        {savedImage ? <img src={savedImage} className="w-full h-full object-contain p-4" /> : <canvas ref={canvasRef} width={400} height={200} className="w-full h-full cursor-crosshair" />}
-                        {!savedImage && <button onClick={() => onSave(canvasRef.current.toDataURL())} className="absolute bottom-3 right-3 bg-slate-900 text-white px-6 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest">Signer</button>}
+                    <div className="relative">
+                        <canvas 
+                            ref={canvasRef} width={400} height={150}
+                            className={`signature-pad w-full h-32 rounded-lg border-2 border-dashed border-slate-200 ${savedImage ? 'print:hidden' : ''}`}
+                            onMouseDown={start} onMouseMove={move} onMouseUp={stop}
+                            onTouchStart={start} onTouchMove={move} onTouchEnd={stop}
+                        />
+                        {savedImage && <img src={savedImage} className="hidden print:block w-full h-32 object-contain border rounded-lg" alt="Signature" />}
                     </div>
                 </div>
             );
-        };
-
-        const compressImage = (file) => {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.src = e.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 800;
-                        let width = img.width, height = img.height;
-                        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-                        canvas.width = width; canvas.height = height;
-                        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-                        resolve(canvas.toDataURL('image/jpeg', 0.6));
-                    };
-                };
-            });
         };
 
         function App() {
+            const [fb, setFb] = useState(window.FirebaseBridge);
             const [user, setUser] = useState(null);
-            const [view, setView] = useState('list');
-            const [reports, setReports] = useState([]);
-            const [currentId, setCurrentId] = useState(null);
             const [step, setStep] = useState(1);
-            const [sync, setSync] = useState('Vérification...');
-            const [isProcessing, setIsProcessing] = useState(false);
-            const [shareModal, setShareModal] = useState(null);
+            const [syncStatus, setSyncStatus] = useState('idle');
             const fileInputRef = useRef(null);
-            const [activeEl, setActiveEl] = useState(null);
-
+            const [activeElement, setActiveElement] = useState(null);
+            
             const [formData, setFormData] = useState({
-                property: { address: '', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') },
-                rooms: [{ id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'B', comment: '', photos: [] }] }],
+                address: "",
+                date: new Date().toLocaleDateString('fr-FR'),
+                owner: "",
+                tenant: "",
+                rooms: [
+                    { id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'Bon', comment: '', photos: [] }] }
+                ],
                 signatures: { owner: null, tenant: null }
             });
 
-            // --- INIT FIREBASE ---
+            // Auth Logic
             useEffect(() => {
-                if (!window.FB_SERVICES) return;
-                const { auth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } = window.FB_SERVICES;
                 const init = async () => {
-                    try {
-                        if (window.__initial_auth_token) await signInWithCustomToken(auth, window.__initial_auth_token);
-                        else await signInAnonymously(auth);
-                        onAuthStateChanged(auth, u => { setUser(u); setSync(u ? 'Connecté' : 'Erreur'); });
-                    } catch (e) { setSync('Erreur API'); }
+                    const bridge = window.FirebaseBridge;
+                    if (!bridge) return;
+                    setFb(bridge);
+
+                    const connect = async () => {
+                        try {
+                            if (bridge.initialToken) {
+                                await bridge.signInWithCustomToken(bridge.auth, bridge.initialToken);
+                            } else {
+                                await bridge.signInAnonymously(bridge.auth);
+                            }
+                        } catch (e) { console.error("Auth error", e); }
+                    };
+                    connect();
+
+                    const unsub = bridge.onAuthStateChanged(bridge.auth, (u) => {
+                        setUser(u);
+                    });
+                    return () => unsub();
                 };
-                init();
+                
+                window.addEventListener('firebase-bridge-ready', init);
+                if (window.FirebaseBridge) init();
+                return () => window.removeEventListener('firebase-bridge-ready', init);
             }, []);
 
-            // --- REALTIME REPORTS ---
+            // Real-time Cloud Sync (Load)
             useEffect(() => {
-                if (!user) return;
-                const { db, appId, collection, onSnapshot } = window.FB_SERVICES;
-                
-                // Check if deep link in URL
-                const params = new URLSearchParams(window.location.search);
-                const reportId = params.get('reportId');
-                if (reportId) {
-                   setCurrentId(reportId);
-                   setView('editor');
-                }
-
-                return onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reports'), (snap) => {
-                    setReports(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                    
-                    // If deep linked, load that specific data
-                    if (reportId) {
-                        const target = snap.docs.find(d => d.id === reportId);
-                        if (target) setFormData(target.data());
+                if (!user || !fb) return;
+                const docRef = fb.doc(fb.db, 'artifacts', fb.appId, 'users', user.uid, 'edl', 'current');
+                const unsub = fb.onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists() && syncStatus !== 'syncing') {
+                        setFormData(prev => ({...prev, ...docSnap.data()}));
                     }
-                });
-            }, [user]);
+                }, (err) => console.warn("Sync error:", err));
+                return () => unsub();
+            }, [user, fb]);
 
-            const save = async (data = formData) => {
-                if (!user) return;
-                setSync('Sauvegarde...');
-                const { db, appId, doc, setDoc, addDoc, collection } = window.FB_SERVICES;
-                try {
-                    if (currentId) {
-                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', currentId), data);
-                    } else {
-                        const res = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reports'), data);
-                        setCurrentId(res.id);
+            // Save Debounce (Push to Cloud)
+            useEffect(() => {
+                if (!user || !fb) return;
+                const timer = setTimeout(async () => {
+                    setSyncStatus('syncing');
+                    try {
+                        const docRef = fb.doc(fb.db, 'artifacts', fb.appId, 'users', user.uid, 'edl', 'current');
+                        await fb.setDoc(docRef, { ...formData, lastUpdated: new Date().toISOString() }, { merge: true });
+                        setSyncStatus('saved');
+                        setTimeout(() => setSyncStatus('idle'), 2000);
+                    } catch (e) { 
+                        setSyncStatus('error');
                     }
-                    setSync('Synchronisé');
-                } catch (e) { setSync('Erreur'); }
+                }, 1500);
+                return () => clearTimeout(timer);
+            }, [formData, user, fb]);
+
+            const triggerPhoto = (roomId, elId) => {
+                setActiveElement({ roomId, elId });
+                fileInputRef.current.click();
             };
 
-            const handlePhoto = async (e) => {
+            const handlePhoto = (e) => {
                 const file = e.target.files[0];
-                if (!file || !activeEl) return;
-                setIsProcessing(true);
-                const base64 = await compressImage(file);
-                const newData = {
-                    ...formData,
-                    rooms: formData.rooms.map(r => r.id === activeEl.roomId ? {
-                        ...r, elements: r.elements.map(el => el.id === activeEl.elId ? {...el, photos: [...(el.photos || []), base64]} : el)
-                    } : r)
+                if (!file || !activeElement) return;
+
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64 = reader.result;
+                    setFormData(prev => ({
+                        ...prev,
+                        rooms: prev.rooms.map(r => r.id === activeElement.roomId ? {
+                            ...r,
+                            elements: r.elements.map(el => el.id === activeElement.elId ? {
+                                ...el,
+                                photos: [...(el.photos || []), base64]
+                            } : el)
+                        } : r)
+                    }));
                 };
-                setFormData(newData);
-                await save(newData);
-                setIsProcessing(false);
-                setActiveEl(null);
+                reader.readAsDataURL(file);
             };
 
-            const handleShare = (id) => {
-                const shareUrl = `${window.location.origin}${window.location.pathname}?reportId=${id}`;
-                setShareModal(shareUrl);
-                if (navigator.share) {
-                    navigator.share({ title: 'État des Lieux', url: shareUrl }).catch(() => {});
-                }
-            };
-
-            if (!user) return <div className="min-h-screen flex items-center justify-center font-black uppercase text-[10px] tracking-[0.5em] text-slate-300">Initialisation...</div>;
-
-            if (view === 'list') return (
-                <div className="max-w-xl mx-auto p-6 pt-20 space-y-8 animate-in fade-in duration-500">
-                    <header className="flex justify-between items-start">
-                        <div>
-                            <h1 className="text-5xl font-black italic uppercase tracking-tighter">Immo-Alex's</h1>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Dossiers Cloud • {sync}</p>
-                        </div>
-                    </header>
-                    <div className="grid gap-4">
-                        {reports.map(r => (
-                            <div key={r.id} className="group bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all relative overflow-hidden">
-                                <div onClick={() => { setFormData(r); setCurrentId(r.id); setView('editor'); setStep(1); }} className="cursor-pointer">
-                                    <h3 className="font-bold uppercase text-sm pr-8">{r.property?.address || 'Sans adresse'}</h3>
-                                    <p className="text-[10px] text-slate-400 mt-2 uppercase">{r.property?.date} • {r.property?.tenant}</p>
-                                </div>
-                                <button onClick={() => handleShare(r.id)} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" /></svg>
-                                </button>
-                            </div>
-                        ))}
-                        <button onClick={() => { setCurrentId(null); setView('editor'); setStep(1); setFormData({ property: { address: '', owner: '', tenant: '', date: new Date().toLocaleDateString('fr-FR') }, rooms: [{ id: 1, name: 'Entrée', elements: [{ id: 101, label: 'Porte', status: 'B', comment: '', photos: [] }] }], signatures: { owner: null, tenant: null } }); }} className="py-16 border-2 border-dashed border-slate-200 rounded-[2.5rem] text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-slate-900 transition-all">+ Nouveau Rapport</button>
-                    </div>
-
-                    {shareModal && (
-                        <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-4">
-                            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShareModal(null)}></div>
-                            <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 relative animate-slide-up shadow-2xl">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest mb-4">Lien de partage</h4>
-                                <div className="flex gap-2">
-                                    <input readOnly value={shareModal} className="flex-1 bg-slate-50 p-4 rounded-2xl text-[10px] font-mono outline-none" />
-                                    <button onClick={() => { document.execCommand('copy'); setShareModal(null); }} className="bg-slate-900 text-white px-6 rounded-2xl text-[10px] font-bold">COPIER</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
+            if (!fb) return <div className="h-screen flex flex-col items-center justify-center text-slate-400"><div className="loader mb-4"></div>Initialisation...</div>;
 
             return (
-                <div className="min-h-screen pb-32">
-                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" capture="environment" onChange={handlePhoto} />
+                <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
+                    <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handlePhoto} />
                     
-                    <header className="fixed top-0 inset-x-0 h-16 bg-white/80 backdrop-blur-md border-b z-50 flex items-center justify-between px-6 no-print">
-                        <button onClick={() => { 
-                            const url = new URL(window.location);
-                            url.searchParams.delete('reportId');
-                            window.history.pushState({}, '', url);
-                            setView('list'); 
-                        }} className="text-slate-400 font-bold uppercase text-[10px]">Quitter</button>
-                        <span className="text-[9px] font-black uppercase text-emerald-500 tracking-widest">{sync}</span>
-                        <button onClick={() => handleShare(currentId)} className="text-slate-400">
-                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" /></svg>
-                        </button>
+                    <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
+                        <div className="flex flex-col">
+                            <span className="text-xl font-black italic tracking-tighter uppercase">Immo-Alex</span>
+                            <div className="flex items-center mt-1">
+                                <span className={`status-pulse ${user ? (syncStatus === 'syncing' ? 'syncing' : 'online') : 'offline'}`}></span>
+                                <span className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">
+                                    {user ? (syncStatus === 'syncing' ? 'Sync Cloud...' : 'Connecté') : 'Déconnecté'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => window.print()} className="p-3 bg-blue-600 rounded-full hover:bg-blue-500 transition-all active:scale-90 shadow-lg">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                            </button>
+                        </div>
                     </header>
 
-                    <main className="max-w-xl mx-auto pt-24 px-6 no-print space-y-12">
+                    <nav className="no-print flex border-b bg-white">
+                        {[1, 2, 3].map(n => (
+                            <button key={n} onClick={() => setStep(n)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${step === n ? 'text-blue-600 border-b-4 border-blue-600 bg-blue-50' : 'text-slate-400'}`}>
+                                {n === 1 ? 'Infos' : n === 2 ? 'Inventaire' : 'Signature'}
+                            </button>
+                        ))}
+                    </nav>
+
+                    <main className="p-6 flex-1">
                         {step === 1 && (
-                            <section className="space-y-8 animate-in slide-in-from-bottom-4">
-                                <h2 className="text-3xl font-black italic uppercase tracking-tight">Le Bien</h2>
-                                <div className="space-y-4 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-50">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-300 ml-2">Adresse</label>
-                                    <input className="w-full p-4 rounded-2xl bg-slate-50 font-bold outline-none" value={formData.property.address} onChange={e => setFormData({...formData, property: {...formData.property, address: e.target.value}})} onBlur={() => save()} /></div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-300 ml-2">Bailleur</label>
-                                        <input className="w-full p-4 rounded-2xl bg-slate-50 font-bold outline-none" value={formData.property.owner} onChange={e => setFormData({...formData, property: {...formData.property, owner: e.target.value}})} onBlur={() => save()} /></div>
-                                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase text-slate-300 ml-2">Locataire</label>
-                                        <input className="w-full p-4 rounded-2xl bg-slate-50 font-bold outline-none" value={formData.property.tenant} onChange={e => setFormData({...formData, property: {...formData.property, tenant: e.target.value}})} onBlur={() => save()} /></div>
+                            <div className="space-y-6">
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Adresse du Bien</label>
+                                    <input type="text" className="w-full bg-transparent text-xl font-bold outline-none" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Ex: 12 Rue de la Paix..." />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Bailleur / Propriétaire</label>
+                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.owner} onChange={e => setFormData({...formData, owner: e.target.value})} placeholder="Nom..." />
+                                    </div>
+                                    <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Locataire</label>
+                                        <input type="text" className="w-full bg-transparent font-bold outline-none" value={formData.tenant} onChange={e => setFormData({...formData, tenant: e.target.value})} placeholder="Nom..." />
                                     </div>
                                 </div>
-                            </section>
+                            </div>
                         )}
 
                         {step === 2 && (
-                            <section className="space-y-8 animate-in slide-in-from-bottom-4">
-                                <div className="flex justify-between items-center">
-                                    <h2 className="text-3xl font-black italic uppercase tracking-tight">Inventaire</h2>
-                                    <button onClick={() => { const d = {...formData, rooms: [...formData.rooms, {id: Date.now(), name: 'Nouvelle Pièce', elements: [{id: Date.now()+1, label: 'Élément', status: 'B', comment: '', photos: []}]}]}; setFormData(d); save(d); }} className="bg-slate-900 text-white w-10 h-10 rounded-full font-bold shadow-lg">+</button>
-                                </div>
+                            <div className="space-y-8">
                                 {formData.rooms.map(room => (
-                                    <div key={room.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-50 space-y-6">
-                                        <div className="flex justify-between items-center border-b pb-4">
-                                            <input className="font-black uppercase text-lg outline-none w-full" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} onBlur={() => save()} />
-                                            <button onClick={() => { const d = {...formData, rooms: formData.rooms.filter(r => r.id !== room.id)}; setFormData(d); save(d); }} className="text-slate-200 hover:text-rose-500 transition-colors ml-4">×</button>
+                                    <div key={room.id} className="room-section border-l-4 border-blue-500 bg-slate-50 pl-4 py-4 rounded-r-2xl mb-6 shadow-sm">
+                                        <div className="flex justify-between items-center mb-4 pr-4">
+                                            <input className="text-lg font-black uppercase w-full outline-none bg-transparent text-blue-900" value={room.name} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, name: e.target.value} : r)})} />
+                                            <button onClick={() => setFormData({...formData, rooms: formData.rooms.filter(r => r.id !== room.id)})} className="no-print text-red-400 p-2"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                                         </div>
-                                        <div className="space-y-6">
+                                        <div className="space-y-4 pr-4">
                                             {room.elements.map(el => (
-                                                <div key={el.id} className="bg-slate-50/50 p-6 rounded-3xl space-y-4">
-                                                    <div className="flex justify-between items-center">
-                                                        <input className="font-bold text-sm uppercase bg-transparent outline-none w-full" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(item => item.id === el.id ? {...item, label: e.target.value} : item)} : r)})} onBlur={() => save()} />
-                                                        <button onClick={() => { const d = {...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.filter(i => i.id !== el.id)} : r)}; setFormData(d); save(d); }} className="text-slate-300">×</button>
+                                                <div key={el.id} className="p-4 border rounded-xl bg-white shadow-sm transition-all">
+                                                    <div className="flex justify-between items-center mb-3 gap-3">
+                                                        <input className="font-bold outline-none flex-1 text-slate-700" value={el.label} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, label: e.target.value} : e2)} : r)})} />
+                                                        <select className="text-[10px] font-black border rounded-lg p-2 bg-slate-50 text-blue-600 outline-none" value={el.status} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, status: e.target.value} : e2)} : r)})}>
+                                                            <option>Neuf</option><option>Bon</option><option>Moyen</option><option>Mauvais</option>
+                                                        </select>
                                                     </div>
-                                                    <div className="flex gap-2">
-                                                        {['N', 'B', 'M', 'X'].map(s => (
-                                                            <button key={s} onClick={() => { const d = {...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(item => item.id === el.id ? {...item, status: s} : item)} : r)}; setFormData(d); save(d); }} 
-                                                                className={`flex-1 py-3 rounded-2xl text-[10px] font-black transition-all ${el.status === s ? 'bg-slate-900 text-white scale-105 shadow-lg' : 'bg-white text-slate-300'}`}>
-                                                                {s === 'N' ? 'NEUF' : s === 'B' ? 'BON' : s === 'M' ? 'MOYEN' : 'DÉGRADÉ'}
-                                                            </button>
+                                                    <div className="no-print flex gap-2 overflow-x-auto pb-2 mb-2 photo-strip">
+                                                        <button onClick={() => triggerPhoto(room.id, el.id)} className="w-14 h-14 shrink-0 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:bg-blue-50 border-2 border-dashed border-slate-200 active:scale-90 transition-transform">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                                        </button>
+                                                        {el.photos?.map((p, idx) => (
+                                                            <div key={idx} className="relative w-14 h-14 shrink-0 border rounded-lg overflow-hidden group">
+                                                                <img src={p} className="w-full h-full object-cover" />
+                                                                <button onClick={() => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, photos: e2.photos.filter((_, i) => i !== idx)} : e2)} : r)})} className="absolute top-0 right-0 bg-red-500 text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                                                            </div>
                                                         ))}
-                                                        <button onClick={() => { setActiveEl({roomId: room.id, elId: el.id}); fileInputRef.current.click(); }} className="w-12 h-12 flex items-center justify-center bg-white text-slate-400 rounded-2xl border hover:text-slate-900 transition-colors shadow-sm">📷</button>
                                                     </div>
-                                                    {el.photos?.length > 0 && (
-                                                        <div className="flex gap-2 overflow-x-auto py-2 scrollbar-hide">
-                                                            {el.photos.map((ph, idx) => (
-                                                                <img key={idx} src={ph} className="w-16 h-16 min-w-[4rem] object-cover rounded-xl border-2 border-white shadow-sm" />
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                    <input className="w-full bg-transparent border-b border-slate-100 text-[10px] italic outline-none focus:border-slate-900" placeholder="Observations..." value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(item => item.id === el.id ? {...item, comment: e.target.value} : item)} : r)})} onBlur={() => save()} />
+                                                    <textarea className="w-full text-xs italic text-slate-500 outline-none border-none bg-transparent resize-none" placeholder="Observations..." rows="1" value={el.comment} onChange={e => setFormData({...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: r.elements.map(e2 => e2.id === el.id ? {...e2, comment: e.target.value} : e2)} : r)})} />
                                                 </div>
                                             ))}
-                                            <button onClick={() => { const d = {...formData, rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...r.elements, {id: Date.now(), label: 'Nouvel Élément', status: 'B', comment: '', photos: []}]} : r)}; setFormData(d); save(d); }} className="w-full py-4 border-2 border-dashed border-slate-100 rounded-3xl text-[9px] font-bold text-slate-300 uppercase tracking-widest hover:border-slate-300 hover:text-slate-900 transition-all">+ Ajouter Élément</button>
+                                            <button onClick={() => {
+                                                setFormData({
+                                                    ...formData,
+                                                    rooms: formData.rooms.map(r => r.id === room.id ? {...r, elements: [...(r.elements || []), { id: Date.now(), label: 'Nouvel élément', status: 'Bon', comment: '', photos: [] }]} : r)
+                                                });
+                                            }} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-slate-300 text-[10px] font-black uppercase hover:border-blue-300 hover:text-blue-300 transition-colors">+ Élément</button>
                                         </div>
                                     </div>
                                 ))}
-                            </section>
+                                <button onClick={() => setFormData({...formData, rooms: [...formData.rooms, { id: Date.now(), name: 'Nouvelle pièce', elements: [] }]})} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all">Ajouter une Pièce</button>
+                            </div>
                         )}
 
                         {step === 3 && (
-                            <section className="space-y-10 animate-in slide-in-from-bottom-4">
-                                <h2 className="text-3xl font-black italic uppercase tracking-tight">Signatures</h2>
-                                <div className="space-y-8">
-                                    <SignaturePad label="Le Bailleur" savedImage={formData.signatures.owner} onSave={img => { const d = {...formData, signatures: {...formData.signatures, owner: img}}; setFormData(d); save(d); }} />
-                                    <SignaturePad label="Le Locataire" savedImage={formData.signatures.tenant} onSave={img => { const d = {...formData, signatures: {...formData.signatures, tenant: img}}; setFormData(d); save(d); }} />
+                            <div className="space-y-8">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <SignaturePad label="Le Bailleur" savedImage={formData.signatures.owner} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, owner: img}})} />
+                                    <SignaturePad label="Le Locataire" savedImage={formData.signatures.tenant} onSave={(img) => setFormData({...formData, signatures: {...formData.signatures, tenant: img}})} />
                                 </div>
-                            </section>
+                                <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-[11px] text-blue-700 font-medium leading-relaxed">
+                                    En signant ce document, les parties reconnaissent que l'état du bien tel que décrit dans ce rapport est exact et conforme à la réalité au jour de la remise des clés.
+                                </div>
+                            </div>
                         )}
-                    </main>
 
-                    <footer className="fixed bottom-10 inset-x-6 no-print z-40">
-                        <div className="max-w-xl mx-auto flex gap-4">
-                            {step > 1 && <button onClick={() => setStep(step - 1)} className="w-16 h-16 bg-white border rounded-full flex items-center justify-center font-bold shadow-xl">←</button>}
-                            <button onClick={() => step < 3 ? setStep(step + 1) : window.print()} className="flex-1 h-16 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-2xl active:scale-95 transition-transform">
-                                {step === 3 ? 'Générer le PDF' : 'Suivant'}
-                            </button>
-                        </div>
-                    </footer>
-
-                    {isProcessing && (
-                        <div className="fixed inset-0 bg-white/80 backdrop-blur-md z-[1000] flex flex-col items-center justify-center space-y-4">
-                            <div className="w-10 h-10 border-4 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Optimisation Image...</p>
-                        </div>
-                    )}
-
-                    {shareModal && (
-                         <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-4">
-                            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShareModal(null)}></div>
-                            <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 relative animate-slide-up shadow-2xl">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest mb-4">Lien de partage direct</h4>
-                                <div className="space-y-4">
-                                    <input readOnly value={shareModal} className="w-full bg-slate-50 p-4 rounded-2xl text-[10px] font-mono outline-none border border-slate-100" />
-                                    <button onClick={() => {
-                                        const el = document.createElement('textarea');
-                                        el.value = shareModal;
-                                        document.body.appendChild(el);
-                                        el.select();
-                                        document.execCommand('copy');
-                                        document.body.removeChild(el);
-                                        setShareModal(null);
-                                    }} className="w-full bg-slate-900 text-white p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest">Copier le lien</button>
+                        {/* Rendu Impression PDF (Invisble à l'écran) */}
+                        <div className="hidden print:block font-serif text-slate-900">
+                            <div className="border-b-8 border-slate-900 pb-4 mb-8 flex justify-between items-end">
+                                <div><h1 className="text-4xl font-black italic uppercase">État des Lieux</h1></div>
+                                <div className="text-right text-sm font-bold uppercase tracking-widest"><p>Établi le : {formData.date}</p></div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-6 mb-10">
+                                <div className="p-6 bg-slate-100 rounded-xl border-2 border-slate-200">
+                                    <h4 className="text-[10px] font-black uppercase text-slate-500 mb-2">Bien Concerné</h4>
+                                    <p className="font-bold text-lg">{formData.address || 'Non spécifié'}</p>
+                                </div>
+                                <div className="space-y-3">
+                                    <div className="p-3 border-2 border-slate-200 rounded-lg text-sm"><b>Bailleur :</b> {formData.owner || 'Non renseigné'}</div>
+                                    <div className="p-3 border-2 border-slate-200 rounded-lg text-sm"><b>Locataire :</b> {formData.tenant || 'Non renseigné'}</div>
                                 </div>
                             </div>
-                        </div>
-                    )}
 
-                    {/* ZONE D'IMPRESSION PDF */}
-                    <div className="hidden print:block p-12 bg-white" id="print-zone">
-                        <div className="flex justify-between items-start border-b-8 border-slate-900 pb-8 mb-12">
-                            <div>
-                                <h1 className="text-5xl font-black italic tracking-tighter uppercase">Immo-Alex's</h1>
-                                <p className="text-slate-400 uppercase text-[10px] font-bold tracking-[0.3em] mt-2">État des lieux certifié</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-3xl font-light">{formData.property.date}</p>
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-12 mb-16">
-                            <div><h4 className="text-[9px] font-black uppercase text-slate-300 mb-2">Adresse</h4><p className="font-bold text-xl">{formData.property.address}</p></div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><h4 className="text-[9px] font-black uppercase text-slate-300 mb-2">Bailleur</h4><p className="font-bold">{formData.property.owner}</p></div>
-                                <div><h4 className="text-[9px] font-black uppercase text-slate-300 mb-2">Locataire</h4><p className="font-bold">{formData.property.tenant}</p></div>
-                            </div>
-                        </div>
-                        <div className="space-y-12">
                             {formData.rooms.map(room => (
-                                <div key={room.id} className="break-inside-avoid">
-                                    <h2 className="text-xl font-black uppercase bg-slate-100 p-4 rounded-xl mb-4">{room.name}</h2>
-                                    <table className="w-full text-left">
-                                        <thead><tr className="border-b-2 border-slate-900"><th className="py-2 text-[10px] uppercase">Élément</th><th className="py-2 text-[10px] uppercase text-center">État</th><th className="py-2 text-[10px] uppercase">Observations</th></tr></thead>
+                                <div key={room.id} className="room-section mb-10">
+                                    <h3 className="text-xl font-black border-b-4 border-slate-900 mb-4 pb-1 uppercase">{room.name}</h3>
+                                    <table className="w-full text-left border-collapse text-xs">
+                                        <thead>
+                                            <tr className="bg-slate-900 text-white uppercase text-[9px] tracking-widest">
+                                                <th className="p-3">Élément</th>
+                                                <th className="p-3 w-24 text-center">État</th>
+                                                <th className="p-3">Observations & Preuves</th>
+                                            </tr>
+                                        </thead>
                                         <tbody>
                                             {room.elements.map(el => (
-                                                <tr key={el.id} className="border-b border-slate-100">
-                                                    <td className="py-6">
-                                                        <span className="font-bold">{el.label}</span>
-                                                        <div className="flex flex-wrap gap-2 mt-4">
-                                                            {el.photos?.map((ph, idx) => <img key={idx} src={ph} className="w-32 h-32 object-cover rounded-lg border shadow-sm" />)}
+                                                <tr key={el.id} className="border-b border-slate-200 break-inside-avoid">
+                                                    <td className="p-3 font-bold align-top">{el.label}</td>
+                                                    <td className="p-3 text-center align-top"><span className="px-2 py-1 bg-slate-100 rounded font-black">{el.status}</span></td>
+                                                    <td className="p-3 align-top">
+                                                        <p className="italic mb-2 text-slate-700">{el.comment || "Pas d'observations particulières."}</p>
+                                                        <div className="flex gap-2 flex-wrap">
+                                                            {el.photos?.map((p, i) => <img key={i} src={p} className="h-16 w-16 object-cover border-2 border-slate-200 rounded shadow-sm" />)}
                                                         </div>
                                                     </td>
-                                                    <td className="py-6 text-center font-black">{el.status}</td>
-                                                    <td className="py-6 italic text-sm text-slate-500">{el.comment || 'RAS'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
                                 </div>
                             ))}
-                        </div>
-                        <div className="mt-32 grid grid-cols-2 gap-20 border-t pt-12 break-inside-avoid">
-                            <div className="text-center space-y-4">
-                                <p className="text-[10px] font-black uppercase">Le Bailleur</p>
-                                {formData.signatures.owner && <img src={formData.signatures.owner} className="h-32 mx-auto object-contain" />}
-                                <p className="font-bold border-t pt-2">{formData.property.owner}</p>
+
+                            <div className="signature-container mt-12 grid grid-cols-2 gap-10">
+                                <div className="text-center">
+                                    <p className="text-[10px] font-black uppercase mb-2 tracking-widest">Signature Bailleur</p>
+                                    <div className="border-2 border-slate-900 h-32 rounded-xl overflow-hidden">
+                                        {formData.signatures.owner && <img src={formData.signatures.owner} className="w-full h-full object-contain" />}
+                                    </div>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-[10px] font-black uppercase mb-2 tracking-widest">Signature Locataire</p>
+                                    <div className="border-2 border-slate-900 h-32 rounded-xl overflow-hidden">
+                                        {formData.signatures.tenant && <img src={formData.signatures.tenant} className="w-full h-full object-contain" />}
+                                    </div>
+                                </div>
                             </div>
-                            <div className="text-center space-y-4">
-                                <p className="text-[10px] font-black uppercase">Le Locataire</p>
-                                {formData.signatures.tenant && <img src={formData.signatures.tenant} className="h-32 mx-auto object-contain" />}
-                                <p className="font-bold border-t pt-2">{formData.property.tenant}</p>
-                            </div>
                         </div>
-                    </div>
+                    </main>
+
+                    <footer className="no-print p-6 border-t bg-slate-50 flex gap-4 sticky bottom-0 z-40">
+                        {step > 1 && <button onClick={() => setStep(step-1)} className="px-6 py-4 bg-white border-2 border-slate-200 font-bold rounded-2xl text-slate-500 active:scale-95 transition-all shadow-sm">Retour</button>}
+                        <button onClick={() => step < 3 ? setStep(step+1) : window.print()} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
+                            {step < 3 ? 'Étape Suivante' : 'Finaliser & PDF'}
+                        </button>
+                    </footer>
                 </div>
             );
         }
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
