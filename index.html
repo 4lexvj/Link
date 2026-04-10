@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Immo-Alex | Cloud & PDF</title>
+    <title>Appart-Alex's | Cloud & PDF</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -33,7 +33,7 @@
         .syncing { background-color: #3b82f6; animation: pulse 1s infinite; }
 
         @keyframes pulse {
-            0% { opacity: 1; }
+            0 { opacity: 1; }
             50% { opacity: 0.4; }
             100% { opacity: 1; }
         }
@@ -60,18 +60,16 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Configuration Firebase (injectée ou par défaut pour le test)
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
             apiKey: "", authDomain: "", projectId: "placeholder-id", storageBucket: "", messagingSenderId: "", appId: ""
         };
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'immo-alex-default';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'appart-alex-default';
         const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // Bridge pour React
         window.FirebaseBridge = {
             auth, db, appId, initialToken,
             doc, setDoc, collection, onSnapshot, query,
@@ -141,10 +139,11 @@
         };
 
         function App() {
-            const [fb, setFb] = useState(window.FirebaseBridge);
+            const [fb, setFb] = useState(null);
             const [user, setUser] = useState(null);
             const [step, setStep] = useState(1);
             const [syncStatus, setSyncStatus] = useState('idle');
+            const [initMessage, setInitMessage] = useState("Vérification de la session...");
             const fileInputRef = useRef(null);
             const [activeElement, setActiveElement] = useState(null);
             
@@ -159,7 +158,7 @@
                 signatures: { owner: null, tenant: null }
             });
 
-            // Auth Logic
+            // Auth Logic Améliorée
             useEffect(() => {
                 const init = async () => {
                     const bridge = window.FirebaseBridge;
@@ -168,17 +167,27 @@
 
                     const connect = async () => {
                         try {
+                            setInitMessage("Authentification...");
                             if (bridge.initialToken) {
-                                await bridge.signInWithCustomToken(bridge.auth, bridge.initialToken);
+                                try {
+                                    await bridge.signInWithCustomToken(bridge.auth, bridge.initialToken);
+                                } catch (tokenErr) {
+                                    console.warn("Token invalide, passage en anonyme...");
+                                    await bridge.signInAnonymously(bridge.auth);
+                                }
                             } else {
                                 await bridge.signInAnonymously(bridge.auth);
                             }
-                        } catch (e) { console.error("Auth error", e); }
+                        } catch (e) { 
+                            console.error("Auth error", e);
+                            setInitMessage("Erreur de connexion. Veuillez rafraîchir.");
+                        }
                     };
                     connect();
 
                     const unsub = bridge.onAuthStateChanged(bridge.auth, (u) => {
                         setUser(u);
+                        if(u) setInitMessage("Chargement des données...");
                     });
                     return () => unsub();
                 };
@@ -196,7 +205,9 @@
                     if (docSnap.exists() && syncStatus !== 'syncing') {
                         setFormData(prev => ({...prev, ...docSnap.data()}));
                     }
-                }, (err) => console.warn("Sync error:", err));
+                }, (err) => {
+                    console.warn("Sync error:", err);
+                });
                 return () => unsub();
             }, [user, fb]);
 
@@ -243,7 +254,13 @@
                 reader.readAsDataURL(file);
             };
 
-            if (!fb) return <div className="h-screen flex flex-col items-center justify-center text-slate-400"><div className="loader mb-4"></div>Initialisation...</div>;
+            if (!user) return (
+                <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
+                    <div className="loader mb-6"></div>
+                    <div className="text-slate-900 font-black italic uppercase tracking-tighter text-2xl mb-2">Appart-Alex</div>
+                    <div className="text-slate-400 text-xs font-bold uppercase tracking-widest animate-pulse">{initMessage}</div>
+                </div>
+            );
 
             return (
                 <div className="max-w-3xl mx-auto bg-white min-h-screen shadow-2xl flex flex-col relative">
@@ -251,7 +268,7 @@
                     
                     <header className="no-print bg-slate-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center">
                         <div className="flex flex-col">
-                            <span className="text-xl font-black italic tracking-tighter uppercase">Immo-Alex</span>
+                            <span className="text-xl font-black italic tracking-tighter uppercase">Appart-Alex</span>
                             <div className="flex items-center mt-1">
                                 <span className={`status-pulse ${user ? (syncStatus === 'syncing' ? 'syncing' : 'online') : 'offline'}`}></span>
                                 <span className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">
@@ -350,10 +367,10 @@
                             </div>
                         )}
 
-                        {/* Rendu Impression PDF (Invisble à l'écran) */}
+                        {/* Rendu Impression PDF */}
                         <div className="hidden print:block font-serif text-slate-900">
                             <div className="border-b-8 border-slate-900 pb-4 mb-8 flex justify-between items-end">
-                                <div><h1 className="text-4xl font-black italic uppercase">État des Lieux</h1></div>
+                                <div><h1 className="text-4xl font-black italic uppercase text-slate-900">Appart-Alex</h1><p className="text-sm font-bold uppercase tracking-widest mt-1">État des Lieux</p></div>
                                 <div className="text-right text-sm font-bold uppercase tracking-widest"><p>Établi le : {formData.date}</p></div>
                             </div>
                             
